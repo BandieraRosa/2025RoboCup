@@ -25,7 +25,7 @@
 #define BRIGHTNESS_THRESHOLD 30    // 强光环境提高到30（8位范围）
 #define COLOR_DIFF_THRESHOLD 15    // 颜色通道差异阈值（8位范围）
 
-#define MIN_PIXEL_COUNT 50
+#define MIN_PIXEL_COUNT 5000
 #define ASPECT_RATIO_MIN 0.6f      // 放宽到0.6以适应朝向不定
 #define ASPECT_RATIO_MAX 1.6f      // 放宽到1.6
 #define FILL_FACTOR_MIN 0.25f      // 降低到0.25（半球+朝向不定）
@@ -60,6 +60,19 @@ void draw_string_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16
 void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
 void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t x, uint16_t y, uint16_t color);
 void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
+
+void image_binary_open(uint8_t *binary_img, int width, int height, int kernel_size);
+void image_binary_close(uint8_t *binary_img, int width, int height, int kernel_size);
+
+typedef struct {
+    int id;               // 标签ID
+    int pixel_count;      // 像素数量 (面积)
+    int min_x, min_y;     // 边界框
+    int max_x, max_y;     // 边界框
+} BlobInfo;
+
+int find_blobs(const uint8_t *binary_img, int width, int height, BlobInfo *blobs, int max_blobs);
+
 
 
 // --- 小球识别部分相关结构体与函数 ---
