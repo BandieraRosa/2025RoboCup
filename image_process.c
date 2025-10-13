@@ -627,6 +627,11 @@ void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_
 // --- 小球识别部分相关函数与宏 ---
 
 
+/**
+ * @brief       识别图像中的主要颜色（红色或蓝色）
+ * @param       snapshot_img_rgb565: RGB565格式的图像数据
+ * @retval      BALL_RED, BALL_BLUE 或 BALL_UNKNOWN
+ */
 int start_color_recognize(uint8_t *snapshot_img_rgb565) {
     int blue_cnt = 0;
     int red_cnt = 0;
@@ -635,21 +640,30 @@ int start_color_recognize(uint8_t *snapshot_img_rgb565) {
 
     for (int i = 0; i < CAMERA_WIDTH * CAMERA_HEIGHT; i++) {
         uint16_t pixel_color = pixel_ptr[i];
-        uint8_t r = (pixel_color & 0xF800) >> 11;
-        uint8_t g = (pixel_color & 0x07E0) >> 5;
-        uint8_t b = (pixel_color & 0x001F);
-        g = g >> 1;
+        
+        // 统一扩展到8位
+        uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;  // 5位->8位
+        uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;   // 6位->8位
+        uint8_t b = (pixel_color & 0x001F) << 3;          // 5位->8位
 
-        if (abs(r - b) < SATURATION_THRESHOLD || (r < BRIGHTNESS_THRESHOLD && b < BRIGHTNESS_THRESHOLD)) {
+        // 计算最大和最小通道值（用于饱和度判断）
+        uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+        uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+        
+        // 饱和度和亮度过滤（强光环境下的阈值）
+        if ((max_c - min_c) < SATURATION_THRESHOLD || max_c < BRIGHTNESS_THRESHOLD) {
             continue;
         }
-        if (r > b && r > g) {
+        
+        // 颜色判断（增加容差以适应强光）
+        if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
             red_cnt++;
         }
-        else if (b > r && b > g) {
+        else if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
             blue_cnt++;
         }
     }
+    
     const int MIN_COUNT_THRESHOLD = 100;
     if (red_cnt > blue_cnt && red_cnt > MIN_COUNT_THRESHOLD) {
         return BALL_RED;
@@ -660,124 +674,110 @@ int start_color_recognize(uint8_t *snapshot_img_rgb565) {
     }
 }
 
+/**
+ * @brief       将指定颜色的区域填充为绿色（用于可视化）
+ * @param       disp: RGB565格式的显示缓冲区
+ * @param       color: 要标记的颜色（BALL_RED 或 BALL_BLUE）
+ */
 void fill_color_area(uint8_t *disp, enum COLOR color) {
     uint16_t *pixel_ptr = (uint16_t *)disp;
     const uint16_t GREEN_COLOR_565 = 0x07E0;
 
     for (int i = 0; i < CAMERA_WIDTH * CAMERA_HEIGHT; i++) {
         uint16_t pixel_color = pixel_ptr[i];
-        uint8_t r = (pixel_color & 0xF800) >> 11;
-        uint8_t g = (pixel_color & 0x07E0) >> 5;
-        uint8_t b = (pixel_color & 0x001F);
-        uint8_t g_scaled = g >> 1;
+        
+        // 统一扩展到8位
+        uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;
+        uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;
+        uint8_t b = (pixel_color & 0x001F) << 3;
 
-        if (abs(r - b) < SATURATION_THRESHOLD || (r < BRIGHTNESS_THRESHOLD && b < BRIGHTNESS_THRESHOLD)) {
+        // 饱和度和亮度过滤
+        uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+        uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+        
+        if ((max_c - min_c) < SATURATION_THRESHOLD || max_c < BRIGHTNESS_THRESHOLD) {
             continue;
         }
 
         int should_paint = 0;
         if (color == BALL_BLUE) {
-            if (b > r && b > g_scaled) {
+            if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
                 should_paint = 1;
             }
         } else if (color == BALL_RED) {
-            if (r > b && r > g_scaled) {
+            if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
                 should_paint = 1;
             }
         }
+        
         if (should_paint) {
             pixel_ptr[i] = GREEN_COLOR_565;
         }
     }
 }
 
-#define TARGET_BLUE_R 4
-#define TARGET_BLUE_G 8  // 注意G是6位，但为了计算方便可以统一或加权
-#define TARGET_BLUE_B 28
-
-#define TARGET_RED_R 30
-#define TARGET_RED_G 8
-#define TARGET_RED_B 5
-
-// 颜色距离的平方阈值，需要调试来确定
-#define COLOR_DISTANCE_THRESHOLD 200 
-
+/**
+ * @brief       基于颜色距离填充区域（已废弃，保留接口兼容性）
+ * @param       disp: RGB565格式的显示缓冲区
+ * @param       color: 要标记的颜色
+ */
 void fill_color_area_by_distance(uint8_t *disp, enum COLOR color) {
-    uint16_t *pixel_ptr = (uint16_t *)disp;
-    const uint16_t GREEN_COLOR_565 = 0x07E0;
-
-    int target_r, target_g, target_b;
-
-    if (color == BALL_BLUE) {
-        target_r = TARGET_BLUE_R;
-        target_g = TARGET_BLUE_G;
-        target_b = TARGET_BLUE_B;
-    } else if (color == BALL_RED) {
-        target_r = TARGET_RED_R;
-        target_g = TARGET_RED_G;
-        target_b = TARGET_RED_B;
-    } else {
-        return;
-    }
-
-    for (int i = 0; i < CAMERA_WIDTH * CAMERA_HEIGHT; i++) {
-        uint16_t pixel_color = pixel_ptr[i];
-        
-        // 1. 解码RGB565像素
-        uint8_t r = (pixel_color & 0xF800) >> 11;
-        uint8_t g = (pixel_color & 0x07E0) >> 5; // g是6位 (0-63)
-        uint8_t b = (pixel_color & 0x001F);
-        
-        // 为了公平比较，可以将6位的g缩放到5位范围
-        uint8_t g_scaled = g >> 1; // 变为 (0-31)
-
-        // 2. 计算颜色距离的平方
-        long dist_sq = (r - target_r) * (r - target_r) +
-                       (g_scaled - target_g) * (g_scaled - target_g) + // 使用缩放后的g
-                       (b - target_b) * (b - target_b);
-
-        // 3. 判断是否在阈值内
-        if (dist_sq < COLOR_DISTANCE_THRESHOLD) {
-            pixel_ptr[i] = GREEN_COLOR_565;
-        }
-    }
+    // 直接调用改进后的 fill_color_area
+    fill_color_area(disp, color);
 }
 
-
+/**
+ * @brief       在图像中查找指定颜色的小球
+ * @param       img_rgb565: RGB565格式的图像数据
+ * @param       ball_color: 要查找的球的颜色（BALL_RED 或 BALL_BLUE）
+ * @retval      BallInfo 结构，包含小球的位置、大小等信息
+ */
 BallInfo find_ball(uint8_t *img_rgb565, enum COLOR ball_color) {
     BallInfo ball = {0, 0, 0, 0, 0};
     uint16_t *pixel_ptr = (uint16_t *)img_rgb565;
 
-    // 用于计算质心和边界框的变量
+    // 用于计算边界框的变量
     long sum_x = 0;
     long sum_y = 0;
     int pixel_count = 0;
-    int min_x = CAMERA_WIDTH, max_x = 0;
-    int min_y = CAMERA_HEIGHT, max_y = 0;
+    int min_x = CAMERA_WIDTH;
+    int max_x = -1;
+    int min_y = CAMERA_HEIGHT;
+    int max_y = -1;
 
-    // 1. 颜色分割 和 2. 聚类 (简化版：假设所有目标色像素属于同一个物体)
+    // 颜色分割和统计
     for (int y = 0; y < CAMERA_HEIGHT; y++) {
         for (int x = 0; x < CAMERA_WIDTH; x++) {
             uint16_t pixel_color = pixel_ptr[y * CAMERA_WIDTH + x];
 
-            uint8_t r = (pixel_color & 0xF800) >> 11;
-            uint8_t g = (pixel_color & 0x07E0) >> 5;
-            uint8_t b = (pixel_color & 0x001F);
-            uint8_t g_scaled = g >> 1;
+            // 统一扩展到8位
+            uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;
+            uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;
+            uint8_t b = (pixel_color & 0x001F) << 3;
 
-            if (abs(r - b) < SATURATION_THRESHOLD || (r < BRIGHTNESS_THRESHOLD && b < BRIGHTNESS_THRESHOLD)) {
-                continue; // 忽略灰度/暗像素
+            // 计算饱和度和亮度
+            uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+            uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+            
+            // 饱和度和亮度过滤（强光环境）
+            if ((max_c - min_c) < SATURATION_THRESHOLD || max_c < BRIGHTNESS_THRESHOLD) {
+                continue;
             }
 
+            // 颜色判断（增加容差）
             int is_target_color = 0;
             if (ball_color == BALL_RED) {
-                if (r > b && r > g_scaled) is_target_color = 1;
-            } else {
-                if (b > r && b > g_scaled) is_target_color = 1;
+                if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
+                    is_target_color = 1;
+                }
+            } else if (ball_color == BALL_BLUE) {
+                if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
+                    is_target_color = 1;
+                }
             }
 
             if (is_target_color) {
-                // 累加坐标和像素数，用于计算质心
+                // 累加坐标和像素数
                 sum_x += x;
                 sum_y += y;
                 pixel_count++;
@@ -791,37 +791,42 @@ BallInfo find_ball(uint8_t *img_rgb565, enum COLOR ball_color) {
         }
     }
 
-    // 3. 特征提取 和 4. 目标筛选
-    if (pixel_count > MIN_PIXEL_COUNT) {
+    // 特征提取和目标筛选
+    if (pixel_count > MIN_PIXEL_COUNT && max_x >= 0 && max_y >= 0) {
         int width = max_x - min_x + 1;
         int height = max_y - min_y + 1;
 
-        // 形状检查1: 宽高比
+        // 宽高比检查（针对朝向不定的半球放宽要求）
         float aspect_ratio = (float)width / height;
         if (aspect_ratio < ASPECT_RATIO_MIN || aspect_ratio > ASPECT_RATIO_MAX) {
-            return ball; // 形状太扁或太长，不是球
+            return ball;  // 形状异常
         }
 
-        // 形状检查2: 填充率
+        // 填充率检查（半球+朝向不定，降低要求并增加上限）
         int bbox_area = width * height;
         float fill_factor = (float)pixel_count / bbox_area;
-        if (fill_factor < FILL_FACTOR_MIN) {
-            return ball; // 物体太稀疏（如'L'形），不是实心球
+        if (fill_factor < FILL_FACTOR_MIN || fill_factor > FILL_FACTOR_MAX) {
+            return ball;  // 填充率异常
         }
 
-        // 所有检查通过，计算最终结果
-        ball.cx = sum_x / pixel_count;
-        ball.cy = sum_y / pixel_count;
+        // 使用边界框中心（更准确，适应半球朝向不定）
+        ball.cx = (min_x + max_x) / 2;
+        ball.cy = (min_y + max_y) / 2;
         ball.pixel_count = pixel_count;
-        // 估算半径：取宽高平均值的一半
-        ball.radius = (width + height) / 4;
+        ball.radius = (width + height) / 4;  // 估算半径
         ball.found = 1;
     }
 
     return ball;
 }
 
-
+/**
+ * @brief       图像降采样（2x2平均池化）
+ * @param       src: 源图像数据
+ * @param       dst: 目标图像缓冲区（需预分配 src_w/2 * src_h/2 大小）
+ * @param       src_w: 源图像宽度
+ * @param       src_h: 源图像高度
+ */
 void downscale_image(const uint8_t *src, uint8_t *dst, int src_w, int src_h) {
     int dst_w = src_w / 2;
     int dst_h = src_h / 2;
@@ -838,15 +843,12 @@ void downscale_image(const uint8_t *src, uint8_t *dst, int src_w, int src_h) {
     }
 }
 
-
 /**
- * @brief       将RGB565格式的图像转换为8位灰度图像。
- * @param       rgb565  输入，指向源RGB565图像数据的指针。
- *                      (函数名中的rgb556应为rgb565，这里按实际功能编写)
- * @param       gray    输出，指向目标8位灰度图像缓冲区的指针。
- *                      该缓冲区的大小必须至少为 width * height 字节。
- * @param       width   图像的宽度（像素）。
- * @param       height  图像的高度（像素）。
+ * @brief       将RGB565格式的图像转换为8位灰度图像
+ * @param       rgb565: 输入，指向源RGB565图像数据的指针
+ * @param       gray: 输出，指向目标8位灰度图像缓冲区的指针
+ * @param       width: 图像的宽度（像素）
+ * @param       height: 图像的高度（像素）
  */
 void rgb565_to_gray(const uint8_t *rgb565, uint8_t *gray, int width, int height)
 {
@@ -870,12 +872,11 @@ void rgb565_to_gray(const uint8_t *rgb565, uint8_t *gray, int width, int height)
 }
 
 /**
- * @brief       将8位灰度图像转换为RGB565格式的图像。
- * @param       gray    输入，指向源8位灰度图像数据的指针。
- * @param       rgb565  输出，指向目标16位RGB565图像缓冲区的指针。
- *                      该缓冲区大小必须至少为 width * height * 2 字节。
- * @param       width   图像的宽度（像素）。
- * @param       height  图像的高度（像素）。
+ * @brief       将8位灰度图像转换为RGB565格式的图像
+ * @param       gray: 输入，指向源8位灰度图像数据的指针
+ * @param       rgb565: 输出，指向目标16位RGB565图像缓冲区的指针
+ * @param       width: 图像的宽度（像素）
+ * @param       height: 图像的高度（像素）
  */
 void gray_to_rgb565(const uint8_t *gray, uint8_t *rgb565, int width, int height)
 {

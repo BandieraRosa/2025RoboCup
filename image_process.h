@@ -7,15 +7,6 @@
  * @brief       图片处理代码
  * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
  ****************************************************************************************************
- * @attention
- *
- * 实验平台:正点原子 K210开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- *
- ****************************************************************************************************
  */
 #ifndef _IMAGE_PROCESS_H
 #define _IMAGE_PROCESS_H
@@ -24,21 +15,21 @@
 #define CAMERA_WIDTH 320
 #define CAMERA_HEIGHT 240
 
-// --- incbin ������� ---
 #define INCBIN_STYLE INCBIN_STYLE_SNAKE
 #define INCBIN_PREFIX
 #define INVALID_DATA -1
 
 
-// --- 小球识别部分相关参数 ---
-#define SATURATION_THRESHOLD 5 
-#define BRIGHTNESS_THRESHOLD 6 
+// --- 小球识别部分相关参数（已针对强光环境和半球优化） ---
+#define SATURATION_THRESHOLD 20    // 强光环境提高到20（8位范围）
+#define BRIGHTNESS_THRESHOLD 30    // 强光环境提高到30（8位范围）
+#define COLOR_DIFF_THRESHOLD 15    // 颜色通道差异阈值（8位范围）
 
 #define MIN_PIXEL_COUNT 50
-#define ASPECT_RATIO_MIN 0.7f
-#define ASPECT_RATIO_MAX 1.4f
-#define FILL_FACTOR_MIN 0.6f
-
+#define ASPECT_RATIO_MIN 0.6f      // 放宽到0.6以适应朝向不定
+#define ASPECT_RATIO_MAX 1.6f      // 放宽到1.6
+#define FILL_FACTOR_MIN 0.25f      // 降低到0.25（半球+朝向不定）
+#define FILL_FACTOR_MAX 1.0f      // 增加上限检查
 
 
 #include <stdint.h>
@@ -71,8 +62,6 @@ void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_
 void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
 
 
-
-
 // --- 小球识别部分相关结构体与函数 ---
 enum COLOR{
     BALL_UNKNOWN = 0,
@@ -84,10 +73,9 @@ typedef struct {
     int cx;          // 小球中心点的 x 坐标
     int cy;          // 小球中心点的 y 坐标
     int radius;      // 小球的估算半径
-    int pixel_count; //组成小球的像素点数量
-    int found;      // 是否找到了小球
+    int pixel_count; // 组成小球的像素点数量
+    int found;       // 是否找到了小球
 } BallInfo;
-
 
 
 int start_color_recognize(uint8_t *snapshot_img_rgb565);
