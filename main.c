@@ -9,13 +9,12 @@
 #include "./BSP/CAMERA/camera.h"
 #include "./BSP/LCD/lcd.h"
 #include "./BSP/UART/uart.h"
+#include "./BSP/KEY/key.h"
 
 // #define DEBUG
 
 #define MAX_BLOBS 100
 #define MIN_BALL_PIXELS 4000
-#define MAX_BALL_PIXELS 18000
-
 
 void init() {
   sysctl_pll_set_freq(SYSCTL_PLL0, 800000000);
@@ -29,11 +28,12 @@ void init() {
 
   usart_init(115200);
   lcd_init();
+  key_init();
   camera_init(0);
   camera_set_pixformat(PIXFORMAT_RGB565);
   camera_set_framesize(CAMERA_WIDTH, CAMERA_HEIGHT);
   camera_set_hmirror(1);
-  // camera_set_light(1);
+  camera_set_light(1);
 }
 
 #ifdef DEBUG
@@ -55,7 +55,20 @@ int main(void) {
   BlobInfo blobs[MAX_BLOBS];
   uint8_t *camera_buf;
 
+  uint8_t key;
+
   while (1) {
+    key = key_scan(0);
+    if (key) {
+      switch (key) {
+        case KEY2_PRES:
+          camera_set_light(1);
+          break;
+        case KEY1_PRES:
+          camera_set_light(0);
+          break;
+      }
+    }
     if (camera_snapshot(&camera_buf, NULL) == 0) {
       uint16_t *pixel_ptr = (uint16_t *)camera_buf;
 
@@ -108,12 +121,11 @@ int main(void) {
 
       int ball_found = 0;
       printf("Largest Blob Pixel Count: %d\n", largest_blob.pixel_count);
-      if (largest_blob.pixel_count >= MIN_BALL_PIXELS &&
-          largest_blob.pixel_count <= MAX_BALL_PIXELS) {
+      if (largest_blob.pixel_count >= MIN_BALL_PIXELS) {
         int width = largest_blob.max_x - largest_blob.min_x;
         int height = largest_blob.max_y - largest_blob.min_y;
 
-        if (height > 0 && width > 0 && height < CAMERA_HEIGHT) {
+        if (height > 0 && width > 0) {
           float aspect_ratio = (float)width / height;
           printf("Blob WxH: %d x %d\n", width, height);
           printf("Aspect Ratio: %.2f\n", aspect_ratio);
@@ -186,7 +198,20 @@ int main(void) {
   BlobInfo blobs[MAX_BLOBS];
   uint8_t *camera_buf;
 
+  uint8_t key;
+
   while (1) {
+    key = key_scan(0);
+    if (key) {
+      switch (key) {
+        case KEY2_PRES:
+          camera_set_light(1);
+          break;
+        case KEY1_PRES:
+          camera_set_light(0);
+          break;
+      }
+    }
     if (camera_snapshot(&camera_buf, NULL) == 0) {
       uint16_t *pixel_ptr = (uint16_t *)camera_buf;
 
@@ -235,12 +260,11 @@ int main(void) {
       }
 
       int ball_found = 0;
-      if (largest_blob.pixel_count >= MIN_BALL_PIXELS &&
-          largest_blob.pixel_count <= MAX_BALL_PIXELS) {
+      if (largest_blob.pixel_count >= MIN_BALL_PIXELS) {
         int width = largest_blob.max_x - largest_blob.min_x;
         int height = largest_blob.max_y - largest_blob.min_y;
 
-        if (height > 0 && width > 0 && height < CAMERA_HEIGHT) {
+        if (height > 0 && width > 0) {
           float aspect_ratio = (float)width / height;
           if (aspect_ratio > 0.3f && aspect_ratio < 1.6f) {
             ball_found = 1;

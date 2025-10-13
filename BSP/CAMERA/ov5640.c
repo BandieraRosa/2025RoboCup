@@ -811,13 +811,14 @@ static int ov5640_set_light(uint8_t enable)
 {
     if (enable)
     {
-        /*
-         * 写入 0x02 到寄存器 0x3016
-         * bit[1] = 1: 使能闪光灯功能 (strobe_en)
-         */
         dvp_sccb_send_data(OV5640_ADDR, 0x3016, 0x02);
         dvp_sccb_send_data(OV5640_ADDR, 0x301c, 0x02);
         dvp_sccb_send_data(OV5640_ADDR, 0x3019, 0x02);
+    }
+    else{
+        dvp_sccb_send_data(OV5640_ADDR, 0x3016, 0x02);
+        dvp_sccb_send_data(OV5640_ADDR, 0x301c, 0x02);
+        dvp_sccb_send_data(OV5640_ADDR, 0x3019, 0x00);
     }
     return 0;
 }
