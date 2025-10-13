@@ -21,9 +21,9 @@
 
 
 // --- 小球识别部分相关参数（已针对强光环境和半球优化） ---
-#define SATURATION_THRESHOLD 20    // 强光环境提高到20（8位范围）
-#define BRIGHTNESS_THRESHOLD 30    // 强光环境提高到30（8位范围）
-#define COLOR_DIFF_THRESHOLD 15    // 颜色通道差异阈值（8位范围）
+#define SATURATION_THRESHOLD 40    // 强光环境提高到20（8位范围）
+#define BRIGHTNESS_THRESHOLD 60    // 强光环境提高到30（8位范围）
+#define COLOR_DIFF_THRESHOLD 30    // 颜色通道差异阈值（8位范围）
 
 #define MIN_PIXEL_COUNT 5000
 #define ASPECT_RATIO_MIN 0.6f      // 放宽到0.6以适应朝向不定
