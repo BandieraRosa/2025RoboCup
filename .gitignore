@@ -1,0 +1,47 @@
+# Object files
+*.o
+*.obj
+
+# Executable files
+*.exe
+*.out
+*.elf
+
+# Build directories
+/build/
+/bin/
+/Debug/
+Release/
+*.d
+
+# Dependency files
+*.d
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# IDE files
+.vscode/
+.cache/
+*.code-workspace
+*.sublime-workspace
+*.sublime-project
+
+# CMake files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Generated files
+*.map
+*.lst
+
+# Others
+*.a
+*.so
+*.dll
+*.lib
+*.dat

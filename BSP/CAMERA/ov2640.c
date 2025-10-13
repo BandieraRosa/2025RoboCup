@@ -1,0 +1,359 @@
+/**
+ ****************************************************************************************************
+ * @file        ov2640.c
+ * @author      正点原子团队(ALIENTEK)
+ * @version     V1.0
+ * @date        2024-01-01
+ * @brief       OV2640 驱动代码
+ * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
+ ****************************************************************************************************
+ * @attention
+ *
+ * 实验平台:正点原子 K210开发板
+ * 在线视频:www.yuanzige.com
+ * 技术论坛:www.openedv.com
+ * 公司网址:www.alientek.com
+ * 购买地址:openedv.taobao.com
+ *
+ ****************************************************************************************************
+ */
+
+#include "ov2640.h"
+#include <math.h>
+#include "dvp.h"
+#include "sleep.h"
+
+#define OV2640_ADDR 0x60
+#define OV2640_PID  0x2642
+
+static const uint8_t ov2640_config[][2] =
+{
+    {0xFF, 0x00},
+    {0x2C, 0xFF},
+    {0x2E, 0xDF},
+    {0xFF, 0x01},
+    {0x3C, 0x32},
+    {0x11, 0x00},
+    {0x09, 0x02},
+    {0x04, 0x28},
+    {0x13, 0xE5},
+    {0x14, 0x48},
+    {0x2C, 0x0C},
+    {0x33, 0x78},
+    {0x3A, 0x33},
+    {0x3B, 0xFB},
+    {0x3E, 0x00},
+    {0x43, 0x11},
+    {0x16, 0x10},
+    {0x39, 0x92},
+    {0x35, 0xDA},
+    {0x22, 0x1A},
+    {0x37, 0xC3},
+    {0x23, 0x00},
+    {0x34, 0xC0},
+    {0x36, 0x1A},
+    {0x06, 0x88},
+    {0x07, 0xC0},
+    {0x0D, 0x87},
+    {0x0E, 0x41},
+    {0x4C, 0x00},
+    {0x48, 0x00},
+    {0x5B, 0x00},
+    {0x42, 0x03},
+    {0x4A, 0x81},
+    {0x21, 0x99},
+    {0x24, 0x40},
+    {0x25, 0x38},
+    {0x26, 0x82},
+    {0x5C, 0x00},
+    {0x63, 0x00},
+    {0x46, 0x22},
+    {0x0C, 0x3C},
+    {0x61, 0x70},
+    {0x62, 0x80},
+    {0x7C, 0x05},
+    {0x20, 0x80},
+    {0x28, 0x30},
+    {0x6C, 0x00},
+    {0x6D, 0x80},
+    {0x6E, 0x00},
+    {0x70, 0x02},
+    {0x71, 0x94},
+    {0x73, 0xC1},
+    {0x12, 0x40},
+    {0x17, 0x11},
+    {0x18, 0x43},
+    {0x19, 0x00},
+    {0x1A, 0x4B},
+    {0x32, 0x09},
+    {0x37, 0xC0},
+    {0x4F, 0xCA},
+    {0x50, 0xA8},
+    {0x5A, 0x23},
+    {0x6D, 0x00},
+    {0x3D, 0x38},
+    {0xFF, 0x00},
+    {0xE5, 0x7F},
+    {0xF9, 0xC0},
+    {0x41, 0x24},
+    {0xE0, 0x14},
+    {0x76, 0xFF},
+    {0x33, 0xA0},
+    {0x42, 0x20},
+    {0x43, 0x18},
+    {0x4C, 0x00},
+    {0x87, 0xD5},
+    {0x88, 0x3F},
+    {0xD7, 0x03},
+    {0xD9, 0x10},
+    {0xD3, 0x82},
+    {0xC8, 0x08},
+    {0xC9, 0x80},
+    {0x7C, 0x00},
+    {0x7D, 0x00},
+    {0x7C, 0x03},
+    {0x7D, 0x48},
+    {0x7D, 0x48},
+    {0x7C, 0x08},
+    {0x7D, 0x20},
+    {0x7D, 0x10},
+    {0x7D, 0x0E},
+    {0x90, 0x00},
+    {0x91, 0x0E},
+    {0x91, 0x1A},
+    {0x91, 0x31},
+    {0x91, 0x5A},
+    {0x91, 0x69},
+    {0x91, 0x75},
+    {0x91, 0x7E},
+    {0x91, 0x88},
+    {0x91, 0x8F},
+    {0x91, 0x96},
+    {0x91, 0xA3},
+    {0x91, 0xAF},
+    {0x91, 0xC4},
+    {0x91, 0xD7},
+    {0x91, 0xE8},
+    {0x91, 0x20},
+    {0x92, 0x00},
+    {0x93, 0x06},
+    {0x93, 0xE3},
+    {0x93, 0x05},
+    {0x93, 0x05},
+    {0x93, 0x00},
+    {0x93, 0x04},
+    {0x93, 0x00},
+    {0x93, 0x00},
+    {0x93, 0x00},
+    {0x93, 0x00},
+    {0x93, 0x00},
+    {0x93, 0x00},
+    {0x93, 0x00},
+    {0x96, 0x00},
+    {0x97, 0x08},
+    {0x97, 0x19},
+    {0x97, 0x02},
+    {0x97, 0x0C},
+    {0x97, 0x24},
+    {0x97, 0x30},
+    {0x97, 0x28},
+    {0x97, 0x26},
+    {0x97, 0x02},
+    {0x97, 0x98},
+    {0x97, 0x80},
+    {0x97, 0x00},
+    {0x97, 0x00},
+    {0xC3, 0xED},
+    {0xA4, 0x00},
+    {0xA8, 0x00},
+    {0xC5, 0x11},
+    {0xC6, 0x51},
+    {0xBF, 0x80},
+    {0xC7, 0x10},
+    {0xB6, 0x66},
+    {0xB8, 0xA5},
+    {0xB7, 0x64},
+    {0xB9, 0x7C},
+    {0xB3, 0xAF},
+    {0xB4, 0x97},
+    {0xB5, 0xFF},
+    {0xB0, 0xC5},
+    {0xB1, 0x94},
+    {0xB2, 0x0F},
+    {0xC4, 0x5C},
+    {0xC0, 0x64},
+    {0xC1, 0x4B},
+    {0x8C, 0x00},
+    {0x86, 0x3D},
+    {0x50, 0x00},
+    {0x51, 0xC8},
+    {0x52, 0x96},
+    {0x53, 0x00},
+    {0x54, 0x00},
+    {0x55, 0x00},
+    {0x5A, 0xC8},
+    {0x5B, 0x96},
+    {0x5C, 0x00},
+    {0xD3, 0x82},
+    {0xC3, 0xED},
+    {0x7F, 0x00},
+    {0xDA, 0x08},
+    {0xE5, 0x1F},
+    {0xE1, 0x67},
+    {0xE0, 0x00},
+    {0xDD, 0x7F},
+    {0x05, 0x00},
+};
+
+/**
+ * @brief       OV2640初始化
+ * @param       无
+ * @retval      0, 初始化成功
+ */
+static int ov2640_init(void)
+{
+    uint16_t product_id;
+    uint16_t index;
+
+    /* Check product ID */
+    dvp_sccb_send_data(OV2640_ADDR, 0xFF, 0x01);
+    product_id = (dvp_sccb_receive_data(OV2640_ADDR, 0x0A) << 8) | dvp_sccb_receive_data(OV2640_ADDR, 0x0B);
+    if (product_id != OV2640_PID)
+    {
+        return 1;
+    }
+
+    /* Software reset */
+    dvp_sccb_send_data(OV2640_ADDR, 0xFF, 0x01);
+    dvp_sccb_send_data(OV2640_ADDR, 0x12, 0x80);
+    msleep(5);
+
+    /* Initlize registers */
+    for (index=0; index<(sizeof(ov2640_config)/sizeof(ov2640_config[0])); index++)
+    {
+        dvp_sccb_send_data(OV2640_ADDR, ov2640_config[index][0], ov2640_config[index][1]);
+    }
+
+    return 0;
+}
+
+static int ov2640_set_pixformat(pixformat_t format)
+{
+    return 0;
+}
+
+/**
+ * @brief       设置图片分辨率大小
+ * @param       width  : 图片的宽度
+ * @param       height : 图片的高度
+ * @retval      0, 操作成功
+ */
+static int ov2640_set_framesize(uint16_t width, uint16_t height)
+{
+    float ratio;
+    uint16_t H_SIZE;
+    uint16_t V_SIZE;
+    uint16_t OFFSET_X;
+    uint16_t OFFSET_Y;
+    uint16_t OUTW;
+    uint16_t OUTH;
+
+    ratio = (800.f / 600.f) / ((float)width / height);
+    if (fabsf(ratio - 1) < 0.0001f)
+    {
+        H_SIZE = 800 >> 2;
+        V_SIZE = 600 >> 2;
+        OFFSET_X = 0;
+        OFFSET_Y = 0;
+    }
+    else if (ratio > 1)
+    {
+        H_SIZE = ((uint16_t)(800 / ratio) >> 2);
+        V_SIZE = 600 >> 2;
+        OFFSET_X = (800 - (H_SIZE << 2)) >> 1;
+        OFFSET_Y = 0;
+    }
+    else
+    {
+        H_SIZE = 800 >> 2;
+        V_SIZE = ((uint16_t)(600 * ratio) >> 2);
+        OFFSET_X = 0;
+        OFFSET_Y = (600 - (V_SIZE << 2)) >> 1;
+    }
+    OUTW = width >> 2;
+    OUTH = height >> 2;
+
+    dvp_sccb_send_data(OV2640_ADDR, 0xFF, 0x00);
+    dvp_sccb_send_data(OV2640_ADDR, 0xE0, 0x04);
+    dvp_sccb_send_data(OV2640_ADDR, 0x51, (uint8_t)(H_SIZE & 0xFF));
+    dvp_sccb_send_data(OV2640_ADDR, 0x52, (uint8_t)(V_SIZE & 0xFF));
+    dvp_sccb_send_data(OV2640_ADDR, 0x53, (uint8_t)(OFFSET_X & 0xFF));
+    dvp_sccb_send_data(OV2640_ADDR, 0x54, (uint8_t)(OFFSET_Y & 0xFF));
+    dvp_sccb_send_data(OV2640_ADDR, 0x55, (uint8_t)(((OFFSET_X >> 8) & 0x7) << 0) | (((H_SIZE >> 8) & 0x1) << 3) | (((OFFSET_Y >> 8) & 0x7) << 4) | (((V_SIZE >> 8) & 0x1) << 7));
+    dvp_sccb_send_data(OV2640_ADDR, 0x57, (uint8_t)(((H_SIZE >> 9) & 0x1) << 7));
+    dvp_sccb_send_data(OV2640_ADDR, 0x5A, (uint8_t)(OUTW & 0xFF));
+    dvp_sccb_send_data(OV2640_ADDR, 0x5B, (uint8_t)(OUTH & 0xFF));
+    dvp_sccb_send_data(OV2640_ADDR, 0x5C, (uint8_t)(((OUTW >> 8) & 0x3) << 0) | (((OUTH >> 8) & 0x1) << 2));
+    dvp_sccb_send_data(OV2640_ADDR, 0xE0, 0x00);
+
+    return 0;
+}
+
+/**
+ * @brief       图片水平翻转
+ * @param       enable  : 0：不翻转 1：翻转
+ * @retval      0, 操作成功
+ */
+static int ov2640_set_hmirror(uint8_t enable)
+{
+    uint8_t REG04;
+
+    dvp_sccb_send_data(OV2640_ADDR, 0xFF, 0x01);
+    REG04 = dvp_sccb_receive_data(OV2640_ADDR, 0x04);
+    if (enable != 0)
+    {
+        REG04 |= (1 << 7);
+    }
+    else
+    {
+        REG04 &= ~(1 << 7);
+    }
+    dvp_sccb_send_data(OV2640_ADDR, 0x04, REG04);
+
+    return 0;
+}
+
+/**
+ * @brief       图片垂直翻转
+ * @param       enable  : 0：不翻转 1：翻转
+ * @retval      0, 操作成功
+ */
+static int ov2640_set_vflip(uint8_t enable)
+{
+    uint8_t REG04;
+
+    dvp_sccb_send_data(OV2640_ADDR, 0xFF, 0x01);
+    REG04 = dvp_sccb_receive_data(OV2640_ADDR, 0x04);
+    if (enable != 0)
+    {
+        REG04 |= ((1 << 6) | (1 << 4));
+    }
+    else
+    {
+        REG04 &= ~((1 << 6) | (1 << 4));
+    }
+    dvp_sccb_send_data(OV2640_ADDR, 0x04, REG04);
+
+    return 0;
+}
+
+const camera_sensor_t camera_ov2640 =
+{
+    .reg_len = 8,
+    .xclk_rate = 24000000,
+    .init = ov2640_init,
+    .set_pixformat = ov2640_set_pixformat,
+    .set_framesize = ov2640_set_framesize,
+    .set_hmirror = ov2640_set_hmirror,
+    .set_vflip = ov2640_set_vflip,
+};
