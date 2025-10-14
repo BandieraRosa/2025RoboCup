@@ -1,102 +1,80 @@
-/**
- ****************************************************************************************************
- * @file        image_process.h
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2024-01-01
- * @brief       图片处理代码
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- */
 #ifndef _IMAGE_PROCESS_H
 #define _IMAGE_PROCESS_H
 
-#define QRCODE_COUNT 3
-#define CAMERA_WIDTH 320
-#define CAMERA_HEIGHT 240
-
-#define INCBIN_STYLE INCBIN_STYLE_SNAKE
-#define INCBIN_PREFIX
-#define INVALID_DATA -1
-
-
-// --- 小球识别部分相关参数（已针对强光环境和半球优化） ---
-#define SATURATION_THRESHOLD 40
-#define BRIGHTNESS_THRESHOLD 60
-#define COLOR_DIFF_THRESHOLD 30
-
-#define MIN_PIXEL_COUNT 5000
-#define ASPECT_RATIO_MIN 0.6f      // 放宽到0.6以适应朝向不定
-#define ASPECT_RATIO_MAX 1.6f      // 放宽到1.6
-#define FILL_FACTOR_MIN 0.25f      // 降低到0.25（半球+朝向不定）
-#define FILL_FACTOR_MAX 1.0f      // 增加上限检查
-
-
 #include <stdint.h>
 
+/* ---------------- 应用/相机配置 ---------------- */
+#ifndef CAMERA_WIDTH
+#define CAMERA_WIDTH 320    /**< 相机图像宽度（像素） */
+#endif
+#ifndef CAMERA_HEIGHT
+#define CAMERA_HEIGHT 240   /**< 相机图像高度（像素） */
+#endif
 
-typedef struct
-{
-    uint8_t *addr;
-    uint16_t width;
-    uint16_t height;
-    uint16_t pixel;
+/* ---------------- 颜色分割阈值 ---------------- */
+#define SATURATION_THRESHOLD 40   /**< 最小色彩饱和度阈值：max(channel) - min(channel) */
+#define BRIGHTNESS_THRESHOLD 60   /**< 最小亮度阈值：max(channel) */
+#define COLOR_DIFF_THRESHOLD 30   /**< 颜色主导阈值：目标通道需高于其他通道的最小差值 */
+
+/* ---------------- 球体候选过滤条件 ---------------- */
+#define MIN_PIXEL_COUNT   5000    /**< 最小像素数：低于该值认为不是有效球体 */
+#define ASPECT_RATIO_MIN  0.3f    /**< 包围盒宽高比下限 */
+#define ASPECT_RATIO_MAX  1.6f    /**< 包围盒宽高比上限 */
+#define FILL_FACTOR_MIN   0.25f   /**< 填充率下限：像素数/包围盒面积 */
+#define FILL_FACTOR_MAX   1.0f    /**< 填充率上限 */
+
+/* ---------------- 基本图像容器 ---------------- */
+typedef struct {
+    uint8_t  *addr;   /**< 通道平面交织缓冲区基址（RGB888 为 R、G、B 三平面顺序相连） */
+    uint16_t  width;  /**< 图像宽度（像素） */
+    uint16_t  height; /**< 图像高度（像素） */
+    uint16_t  pixel;  /**< 每通道每像素字节数（例如 8 位灰度为 1） */
 } image_t;
 
+/* ---------------- 内存辅助 ---------------- */
+int  image_init(image_t *image);     /**< 使用 iomem 分配器初始化图像缓冲，成功返回 0 */
+void image_deinit(image_t *image);   /**< 释放由 iomem 分配的图像缓冲 */
 
-int image_init(image_t *image);
-void image_deinit(image_t *image);
-void image_crop(image_t *image_src, image_t *image_dst, uint16_t x_offset, uint16_t y_offset);
-void image_draw(image_t *image_src, image_t *image_dst, uint16_t x_start, uint16_t y_start);
-void image_resize(image_t *image_src, image_t *image_dst);
+/* ---------------- RGB888 图像操作 ---------------- */
+void image_crop(image_t *image_src, image_t *image_dst, uint16_t x_offset, uint16_t y_offset);     /**< 裁剪（越界区域补 0） */
+void image_draw(image_t *image_src, image_t *image_dst, uint16_t x_start, uint16_t y_start);       /**< 绘制到目标图像的指定起点（先清空目标） */
+void image_resize(image_t *image_src, image_t *image_dst);                                         /**< 双线性缩放 */
 
-void image_rgb888_to_gray(uint8_t *image_addr, uint16_t image_width, uint16_t image_height);
-void image_replace(uint8_t *image_addr, uint16_t image_width, uint16_t image_height,uint8_t vflip,uint8_t hmirror);
-void image_invert(uint8_t *image_addr, uint16_t image_width, uint16_t image_height);
-void image_strech_chart(uint8_t *image_addr, uint16_t image_width, uint16_t image_height, uint8_t de_dark);
-void rgb888_to_rgb565(uint8_t *src_addr, uint16_t *dest_addr, uint16_t image_width, uint16_t image_height);
+void image_rgb888_to_gray(uint8_t *image_addr, uint16_t image_width, uint16_t image_height);       /**< 灰度化（就地） */
+void image_replace(uint8_t *image_addr, uint16_t image_width, uint16_t image_height, uint8_t vflip, uint8_t hmirror); /**< 垂直翻转/水平镜像（就地） */
+void image_invert(uint8_t *image_addr, uint16_t image_width, uint16_t image_height);               /**< 反相（就地） */
+void image_strech_chart(uint8_t *image_addr, uint16_t image_width, uint16_t image_height, uint8_t de_dark); /**< 简单拉伸+暗角补偿 */
 
-void draw_string_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t image_height, uint16_t x, uint16_t y, char *str, uint16_t color);
-void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
-void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t x, uint16_t y, uint16_t color);
-void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
+/* ---------------- RGB565 转换与绘图 ---------------- */
+void rgb888_to_rgb565(uint8_t *src_addr, uint16_t *dest_addr, uint16_t image_width, uint16_t image_height); /**< RGB888(三平面) → RGB565 */
+void draw_string_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t image_height, uint16_t x, uint16_t y, char *str, uint16_t color); /**< 绘制 8x16 ASCII 文本 */
+void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);         /**< 绘制矩形边框 */
+void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width, uint16_t x, uint16_t y, uint16_t color);                                   /**< 绘制像素点 */
+void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width, uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);     /**< 填充矩形 */
 
-void image_binary_open(uint8_t *binary_img, int width, int height, int kernel_size);
-void image_binary_close(uint8_t *binary_img, int width, int height, int kernel_size);
+/* ---------------- 灰度与 RGB565 互转 ---------------- */
+void gray_to_rgb565(const uint8_t *gray, uint8_t *rgb565, int width, int height);   /**< 灰度 → RGB565 */
 
+/* ---------------- 形态学（0/255 二值图） ---------------- */
+void image_binary_open(uint8_t *binary_img, int width, int height, int kernel_size);   /**< 开运算：先腐蚀后膨胀 */
+void image_binary_close(uint8_t *binary_img, int width, int height, int kernel_size);  /**< 闭运算：先膨胀后腐蚀 */
+
+/* ---------------- 连通域（Blob）检测 ---------------- */
 typedef struct {
-    int id;               // 标签ID
-    int pixel_count;      // 像素数量 (面积)
-    int min_x, min_y;     // 边界框
-    int max_x, max_y;     // 边界框
+    int id;               /**< 标签 ID（压缩后 1 起始） */
+    int pixel_count;      /**< 像素数 */
+    int min_x, min_y;     /**< 包围盒左上角 */
+    int max_x, max_y;     /**< 包围盒右下角 */
 } BlobInfo;
 
-int find_blobs(const uint8_t *binary_img, int width, int height, BlobInfo *blobs, int max_blobs);
+int find_blobs(const uint8_t *binary_img, int width, int height, BlobInfo *blobs, int max_blobs); /**< 返回实际检测到的 blob 数 */
 
-
-
-// --- 小球识别部分相关结构体与函数 ---
+/* ---------------- 基于颜色的简易球体检测 ---------------- */
 enum COLOR{
-    BALL_UNKNOWN = 0,
-    BALL_BLUE = 1,
-    BALL_RED = 2
+    BALL_UNKNOWN = 0,   /**< 未知/无主导颜色 */
+    BALL_BLUE    = 1,   /**< 蓝球 */
+    BALL_RED     = 2    /**< 红球 */
 };
 
-typedef struct {
-    int cx;          // 小球中心点的 x 坐标
-    int cy;          // 小球中心点的 y 坐标
-    int radius;      // 小球的估算半径
-    int pixel_count; // 组成小球的像素点数量
-    int found;       // 是否找到了小球
-} BallInfo;
-
-
-int start_color_recognize(uint8_t *snapshot_img_rgb565);
-void fill_color_area(uint8_t *disp, enum COLOR color);
-void fill_color_area_by_distance(uint8_t *disp, enum COLOR color);
-BallInfo find_ball(uint8_t *img_rgb565, enum COLOR ball_color);
-void downscale_image(const uint8_t *src, uint8_t *dst, int src_w, int src_h);
-void rgb565_to_gray(const uint8_t *rgb565, uint8_t *gray, int width, int height);
-void gray_to_rgb565(const uint8_t *gray, uint8_t *rgb565, int width, int height);
 
 #endif /* _IMAGE_PROCESS_H */
