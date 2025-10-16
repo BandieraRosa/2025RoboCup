@@ -12,6 +12,7 @@
 #include "./BSP/UART/uart.h"
 
 #define DEBUG
+// #define PIXEL_DEBUG
 
 #define MAX_BLOBS 50
 
@@ -128,7 +129,8 @@ int main(void) {
           float aspect_ratio = (float)width / height;
           printf("Blob WxH: %d x %d\n", width, height);
           printf("Aspect Ratio: %.2f\n", aspect_ratio);
-          if (aspect_ratio > ASPECT_RATIO_MIN && aspect_ratio < ASPECT_RATIO_MAX) {
+          if (aspect_ratio > ASPECT_RATIO_MIN &&
+              aspect_ratio < ASPECT_RATIO_MAX) {
             ball_found = 1;
           }
         }
@@ -224,6 +226,27 @@ int main(void) {
   return 0;
 }
 
+#elif defined(PIXEL_DEBUG)
+int main(void) {
+  init();
+  uint8_t *camera_buf;
+  while (1) {
+    if (camera_snapshot(&camera_buf, NULL) == 0) {
+      uint16_t *pixel_ptr = (uint16_t *)camera_buf;
+
+      uint16_t center_pixel =
+          pixel_ptr[(CAMERA_HEIGHT / 2) * CAMERA_WIDTH + (CAMERA_WIDTH / 2)];
+      uint8_t r = ((center_pixel & 0xF800) >> 11) << 3;
+      uint8_t g = ((center_pixel & 0x07E0) >> 5) << 2;
+      uint8_t b = (center_pixel & 0x001F) << 3;
+      printf("Center Pixel: R=%d, G=%d, B=%d\n", r, g, b);
+      camera_snapshot_release();
+    }
+  }
+  free(camera_buf);
+  return 0;
+}
+
 #else
 int main(void) {
   init();
@@ -304,7 +327,8 @@ int main(void) {
 
         if (height > 0 && width > 0) {
           float aspect_ratio = (float)width / height;
-          if (aspect_ratio > ASPECT_RATIO_MIN && aspect_ratio < ASPECT_RATIO_MAX) {
+          if (aspect_ratio > ASPECT_RATIO_MIN &&
+              aspect_ratio < ASPECT_RATIO_MAX) {
             ball_found = 1;
           }
         }
