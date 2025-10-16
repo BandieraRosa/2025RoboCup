@@ -1,10 +1,11 @@
 #include "image_process.h"
 #include "./BSP/LCD/lcdfont.h"
 #include "iomem.h"
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ---------------- 内部工具 ---------------- */
 
 static inline int image_buffer_ready(const image_t *image) {
   return (image != NULL) && (image->addr != NULL) && (image->width > 0U) &&
@@ -14,6 +15,8 @@ static inline int image_buffer_ready(const image_t *image) {
 static inline size_t image_plane_size(const image_t *image) {
   return (size_t)image->width * (size_t)image->height;
 }
+
+/* ---------------- 基础分配/释放 ---------------- */
 
 int image_init(image_t *image) {
   if (!image_buffer_ready(image))
@@ -36,6 +39,8 @@ void image_deinit(image_t *image) {
     image->addr = NULL;
   }
 }
+
+/* ---------------- RGB888 图像操作 ---------------- */
 
 void image_crop(image_t *image_src, image_t *image_dst, uint16_t x_offset,
                 uint16_t y_offset) {
@@ -117,15 +122,7 @@ void image_draw(image_t *image_src, image_t *image_dst, uint16_t x_start,
   }
 }
 
-/**
- * @brief       图片缩放
- * @param       image_src:源图片的结构体指针
- * @param       image_dst:目标图片的结构体指针
- * @retval      无
- */
-void image_resize(image_t *image_src,
-                  image_t *image_dst) /* 缩放，缩放大小与两个结构体有关*/
-{
+void image_resize(image_t *image_src, image_t *image_dst) {
   uint16_t x1, x2, y1, y2;
   float w_scale, h_scale;
   float temp1, temp2;
@@ -186,15 +183,6 @@ void image_resize(image_t *image_src,
   }
 }
 
-/**
- * @brief       RGB888图片翻转
- * @param       image_addr:RGB888图片起始地址
- * @param       image_width:图片宽度
- * @param       image_height:图片高度
- * @param       vflip:垂直翻转
- * @param       hmirror:水平翻转
- * @retval      无
- */
 void image_replace(uint8_t *image_addr, uint16_t image_width,
                    uint16_t image_height, uint8_t vflip, uint8_t hmirror) {
   uint8_t *src, *r_src, *g_src, *b_src;
@@ -245,44 +233,6 @@ void image_replace(uint8_t *image_addr, uint16_t image_width,
   }
 }
 
-/**
- * @brief       RGB888转灰度图
- * @param       image_addr:RGB888图片起始地址
- * @param       image_width:图片宽度
- * @param       image_height:图片高度
- * @retval      无
- */
-void image_rgb888_to_gray(uint8_t *image_addr, uint16_t image_width,
-                          uint16_t image_height) {
-  uint8_t *src, *r_src, *g_src, *b_src;
-  int gray_temp;
-
-  src = image_addr;
-  r_src = src;
-  g_src = r_src + image_width * image_height;
-  b_src = g_src + image_width * image_height;
-
-  for (uint32_t j = 0; j < image_width * image_height; j++) {
-    gray_temp = (306 * (int)*r_src + 601 * (int)*g_src + 117 * (int)*b_src) >>
-                10; /* 转换公式 */
-
-    *r_src = (uint8_t)gray_temp;
-    *g_src = (uint8_t)gray_temp;
-    *b_src = (uint8_t)gray_temp;
-
-    r_src++;
-    g_src++;
-    b_src++;
-  }
-}
-
-/**
- * @brief       RGB888颜色值翻转
- * @param       image_addr:RGB888图片起始地址
- * @param       image_width:图片宽度
- * @param       image_height:图片高度
- * @retval      无
- */
 void image_invert(uint8_t *image_addr, uint16_t image_width,
                   uint16_t image_height) {
   uint8_t *r_src, *g_src, *b_src;
@@ -301,14 +251,6 @@ void image_invert(uint8_t *image_addr, uint16_t image_width,
   }
 }
 
-/**
- * @brief       RGB888去除暗角
- * @param       image_addr:RGB888图片起始地址
- * @param       image_width:图片宽度
- * @param       image_height:图片高度
- * @param       de_dark : 删除暗角
- * @retval      无
- */
 void image_strech_chart(uint8_t *image_addr, uint16_t image_width,
                         uint16_t image_height, uint8_t de_dark) {
   uint8_t *r_src, *g_src, *b_src;
@@ -358,38 +300,252 @@ void image_strech_chart(uint8_t *image_addr, uint16_t image_width,
   }
 }
 
-/**
- * @brief       RGB888转RGB565
- * @param       src_addr:RGB888图片起始地址
- * @param       dest_addr:RGB565图片起始地址
- * @param       image_width:图片宽度
- * @param       image_height:图片高度
- * @retval      无
- */
-void rgb888_to_rgb565(uint8_t *src_addr, uint16_t *dest_addr,
-                      uint16_t image_width, uint16_t image_height) {
-  size_t chn_size = image_width * image_height;
-  for (size_t i = 0; i < image_width * image_height; i++) {
-    uint8_t r = src_addr[i];
-    uint8_t g = src_addr[chn_size + i];
-    uint8_t b = src_addr[chn_size * 2 + i];
+/* ---------------- 颜色空间转换：像素级 ---------------- */
 
-    uint16_t rgb = ((r & 0b11111000) << 8) | ((g & 0b11111100) << 3) | (b >> 3);
-    size_t d_i = i % 2 ? (i - 1) : (i + 1);
-    dest_addr[d_i] = rgb;
-  }
+void rgb888_to_rgb565_pixel(uint8_t r, uint8_t g, uint8_t b, uint16_t *rgb565) {
+    *rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-/**
- * @brief       在图片上写入字符串
- * @param       image_addr:RGB565图片起始地址
- * @param       x,y:起始坐标
- * @param       image_width:图片宽度
- * @param       image_height:图片高度
- * @param       str:字符数据
- * @param       color:字体颜色
- * @retval      无
- */
+void rgb565_to_rgb888_pixel(uint16_t rgb565, uint8_t *r, uint8_t *g, uint8_t *b) {
+    uint8_t r5 = (rgb565 >> 11) & 0x1F;
+    uint8_t g6 = (rgb565 >> 5) & 0x3F;
+    uint8_t b5 = rgb565 & 0x1F;
+    *r = (r5 << 3) | (r5 >> 2);
+    *g = (g6 << 2) | (g6 >> 4);
+    *b = (b5 << 3) | (b5 >> 2);
+}
+
+void rgb888_to_gray_pixel(uint8_t r, uint8_t g, uint8_t b, uint8_t *gray) {
+    /* Y ≈ 0.299R + 0.587G + 0.114B，使用整数近似： (306*r + 601*g + 117*b) >> 10 */
+    *gray = (uint8_t)((306 * r + 601 * g + 117 * b) >> 10);
+}
+
+void gray_to_rgb888_pixel(uint8_t gray, uint8_t *r, uint8_t *g, uint8_t *b) {
+    *r = gray; *g = gray; *b = gray;
+}
+
+void rgb565_to_gray_pixel(uint16_t rgb565, uint8_t *gray) {
+    uint8_t r, g, b;
+    rgb565_to_rgb888_pixel(rgb565, &r, &g, &b);
+    rgb888_to_gray_pixel(r, g, b, gray);
+}
+
+void gray_to_rgb565_pixel(uint8_t gray, uint16_t *rgb565) {
+    uint8_t r, g, b;
+    gray_to_rgb888_pixel(gray, &r, &g, &b);
+    rgb888_to_rgb565_pixel(r, g, b, rgb565);
+}
+
+void rgb888_to_hsv_pixel(uint8_t r, uint8_t g, uint8_t b, uint16_t *h, uint8_t *s, uint8_t *v) {
+    uint8_t min_val = r < g ? r : g;
+    min_val = min_val < b ? min_val : b;
+    uint8_t max_val = r > g ? r : g;
+    max_val = max_val > b ? max_val : b;
+
+    *v = max_val;
+    if (max_val == 0) { *s = 0; *h = 0; return; }
+
+    int32_t delta = (int32_t)max_val - (int32_t)min_val;
+    if (delta == 0) { *s = 0; *h = 0; return; }
+
+    *s = (uint8_t)(255 * delta / max_val);
+
+    int32_t hue;
+    if (r == max_val)       hue = (int32_t)(g - b) * 60 / delta;
+    else if (g == max_val)  hue = 120 + (int32_t)(b - r) * 60 / delta;
+    else                    hue = 240 + (int32_t)(r - g) * 60 / delta;
+
+    if (hue < 0) hue += 360;
+    *h = (uint16_t)hue;
+}
+
+void hsv_to_rgb888_pixel(uint16_t h, uint8_t s, uint8_t v, uint8_t *r, uint8_t *g, uint8_t *b) {
+    if (s == 0) { *r = *g = *b = v; return; }
+
+    h %= 360;
+    uint8_t region = h / 60;
+    uint16_t remainder = (h % 60) * 255 / 60;
+
+    uint16_t p = (v * (255 - s)) / 255;
+    uint16_t q = (v * (255 * 255 - s * remainder)) / (255 * 255);
+    uint16_t t = (v * (255 * 255 - s * (255 - remainder))) / (255 * 255);
+
+    switch (region) {
+        case 0: *r = v; *g = t; *b = p; break;
+        case 1: *r = q; *g = v; *b = p; break;
+        case 2: *r = p; *g = v; *b = t; break;
+        case 3: *r = p; *g = q; *b = v; break;
+        case 4: *r = t; *g = p; *b = v; break;
+        default:*r = v; *g = p; *b = q; break;
+    }
+}
+
+void rgb565_to_hsv_pixel(uint16_t rgb565, uint16_t *h, uint8_t *s, uint8_t *v) {
+    uint8_t r, g, b;
+    rgb565_to_rgb888_pixel(rgb565, &r, &g, &b);
+    rgb888_to_hsv_pixel(r, g, b, h, s, v);
+}
+
+void hsv_to_rgb565_pixel(uint16_t h, uint8_t s, uint8_t v, uint16_t *rgb565) {
+    uint8_t r, g, b;
+    hsv_to_rgb888_pixel(h, s, v, &r, &g, &b);
+    rgb888_to_rgb565_pixel(r, g, b, rgb565);
+}
+
+/* ---------------- 颜色空间转换：图像级 ---------------- */
+
+void rgb888_to_gray(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint8_t *p_src_r = (const uint8_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+    const uint8_t *p_src_g = p_src_r + plane_size;
+    const uint8_t *p_src_b = p_src_g + plane_size;
+
+    uint8_t *p_dst = (uint8_t*)dst_addr;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        rgb888_to_gray_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst[i]);
+    }
+}
+
+void gray_to_rgb888(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint8_t *p_src = (const uint8_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+
+    uint8_t *p_dst_r = (uint8_t*)dst_addr;
+    uint8_t *p_dst_g = p_dst_r + plane_size;
+    uint8_t *p_dst_b = p_dst_g + plane_size;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        p_dst_r[i] = p_src[i];
+        p_dst_g[i] = p_src[i];
+        p_dst_b[i] = p_src[i];
+    }
+}
+
+void rgb888_to_rgb565(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint8_t *p_src_r = (const uint8_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+    const uint8_t *p_src_g = p_src_r + plane_size;
+    const uint8_t *p_src_b = p_src_g + plane_size;
+
+    uint16_t *p_dst = (uint16_t*)dst_addr;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        rgb888_to_rgb565_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst[i]);
+    }
+}
+
+void rgb565_to_rgb888(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint16_t *p_src = (const uint16_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+
+    uint8_t *p_dst_r = (uint8_t*)dst_addr;
+    uint8_t *p_dst_g = p_dst_r + plane_size;
+    uint8_t *p_dst_b = p_dst_g + plane_size;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        rgb565_to_rgb888_pixel(p_src[i], &p_dst_r[i], &p_dst_g[i], &p_dst_b[i]);
+    }
+}
+
+void gray_to_rgb565(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint8_t *p_src = (const uint8_t*)src_addr;
+    uint16_t *p_dst = (uint16_t*)dst_addr;
+    size_t num_pixels = (size_t)width * (size_t)height;
+
+    for (size_t i = 0; i < num_pixels; i++) {
+        gray_to_rgb565_pixel(p_src[i], &p_dst[i]);
+    }
+}
+
+void rgb565_to_gray(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint16_t *p_src = (const uint16_t*)src_addr;
+    uint8_t *p_dst = (uint8_t*)dst_addr;
+    size_t num_pixels = (size_t)width * (size_t)height;
+
+    for (size_t i = 0; i < num_pixels; i++) {
+        rgb565_to_gray_pixel(p_src[i], &p_dst[i]);
+    }
+}
+
+void rgb888_to_hsv(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint8_t *p_src_r = (const uint8_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+    const uint8_t *p_src_g = p_src_r + plane_size;
+    const uint8_t *p_src_b = p_src_g + plane_size;
+
+    uint16_t *p_dst_h = (uint16_t*)dst_addr;
+    uint8_t  *p_dst_s = (uint8_t*)(p_dst_h + plane_size);
+    uint8_t  *p_dst_v = p_dst_s + plane_size;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        rgb888_to_hsv_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst_h[i], &p_dst_s[i], &p_dst_v[i]);
+    }
+}
+
+void hsv_to_rgb888(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint16_t *p_src_h = (const uint16_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+    const uint8_t  *p_src_s = (const uint8_t*)(p_src_h + plane_size);
+    const uint8_t  *p_src_v = p_src_s + plane_size;
+
+    uint8_t *p_dst_r = (uint8_t*)dst_addr;
+    uint8_t *p_dst_g = p_dst_r + plane_size;
+    uint8_t *p_dst_b = p_dst_g + plane_size;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        hsv_to_rgb888_pixel(p_src_h[i], p_src_s[i], p_src_v[i], &p_dst_r[i], &p_dst_g[i], &p_dst_b[i]);
+    }
+}
+
+void rgb565_to_hsv(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint16_t *p_src = (const uint16_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+
+    uint16_t *p_dst_h = (uint16_t*)dst_addr;
+    uint8_t  *p_dst_s = (uint8_t*)(p_dst_h + plane_size);
+    uint8_t  *p_dst_v = p_dst_s + plane_size;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        rgb565_to_hsv_pixel(p_src[i], &p_dst_h[i], &p_dst_s[i], &p_dst_v[i]);
+    }
+}
+
+void hsv_to_rgb565(const void *src_addr, void *dst_addr, int width, int height) {
+    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+
+    const uint16_t *p_src_h = (const uint16_t*)src_addr;
+    size_t plane_size = (size_t)width * (size_t)height;
+    const uint8_t  *p_src_s = (const uint8_t*)(p_src_h + plane_size);
+    const uint8_t  *p_src_v = p_src_s + plane_size;
+
+    uint16_t *p_dst = (uint16_t*)dst_addr;
+
+    for (size_t i = 0; i < plane_size; i++) {
+        hsv_to_rgb565_pixel(p_src_h[i], p_src_s[i], p_src_v[i], &p_dst[i]);
+    }
+}
+
+/* ---------------- RGB565 绘图操作 ---------------- */
+
 void draw_string_rgb565_image(uint16_t *image_addr, uint16_t image_width,
                               uint16_t image_height, uint16_t x, uint16_t y,
                               char *str, uint16_t color) {
@@ -420,46 +576,29 @@ void draw_string_rgb565_image(uint16_t *image_addr, uint16_t image_width,
   while (*str) {
     for (i = 0; i < 16; i++) {
       data = ascii0816[*str * 16 + i];
-      src = origin + i * w_src; /*写完8个点后偏移到下一行*/
+      src = origin + i * w_src;
       for (j = 0; j < 8; j++) {
         if (data & 0x80) {
           src[j] = color;
-          // lcd_draw_point(x + j, y + i + 16, color);
         }
         data <<= 1;
       }
-      // y++;
-      // src += 2 * w_src;
     }
     str++;
-    origin += 8; /*偏移下个字符的起点*/
-                 // x += 8;
+    origin += 8;
   }
 }
 
-/**
- * @brief       在图片上写矩形框
- * @param       image_addr:RGB565图片起始地址
- * @param       image_width:图片宽度
- * @param       x1,y1:起点坐标
- * @param       x2,y2:终点坐标
- * @param       color:字体颜色
- * @retval      无
- */
 void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width,
                            uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2,
                            uint16_t color) {
   uint32_t data = ((uint32_t)color << 16) | (uint32_t)color;
   uint32_t *addr1, *addr2, *addr3, *addr4;
 
-  if (x1 < 1)
-    x1 = 0;
-  if (x2 > 319)
-    x2 = 319;
-  if (y1 < 1)
-    y1 = 0;
-  if (y2 > 239)
-    y2 = 239;
+  if (x1 < 1) x1 = 0;
+  if (x2 > 319) x2 = 319;
+  if (y1 < 1) y1 = 0;
+  if (y2 > 239) y2 = 239;
 
   addr1 = (uint32_t *)image_addr + (image_width * y1 + x1) / 2;
   addr2 = (uint32_t *)image_addr + (image_width * (y1 + 1) + x1) / 2;
@@ -467,15 +606,10 @@ void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width,
   addr4 = (uint32_t *)image_addr + (image_width * (y2 - 1) + x1) / 2;
 
   for (uint8_t i = 0; i < (x2 - x1) / 2; i++) {
-    *addr1 = data;
-    *addr2 = data;
-    *addr3 = data;
-    *addr4 = data;
-
-    addr1++;
-    addr2++;
-    addr3++;
-    addr4++;
+    *addr1++ = data;
+    *addr2++ = data;
+    *addr3++ = data;
+    *addr4++ = data;
   }
 
   addr1 = (uint32_t *)image_addr + (image_width * y1 + x1) / 2;
@@ -488,34 +622,19 @@ void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width,
   }
 }
 
-/**
- * @brief       在图片上填充矩形颜色条
- * @param       image_addr:RGB565图片起始地址
- * @param       image_width:图片宽度
- * @param       x1,y1:起点坐标
- * @param       x2,y2:终点坐标
- * @param       color:颜色
- * @retval      无
- */
 void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width,
                                uint16_t x1, uint16_t y1, uint16_t x2,
                                uint16_t y2, uint16_t color) {
   uint32_t data = ((uint32_t)color << 16) | (uint32_t)color;
   uint32_t *addr;
 
-  if (x1 < 1)
-    x1 = 0;
-  if (x2 > 319)
-    x2 = 319;
-  if (y1 < 1)
-    y1 = 0;
-  if (y2 > 239)
-    y2 = 239;
+  if (x1 < 1) x1 = 0;
+  if (x2 > 319) x2 = 319;
+  if (y1 < 1) y1 = 0;
+  if (y2 > 239) y2 = 239;
 
   addr = (uint32_t *)image_addr + (image_width * y1 + x1) / 2;
-
   for (uint8_t j = 0; j < y2 - y1; j++) {
-
     for (uint8_t i = 0; i < (x2 - x1) / 2; i++) {
       addr[i] = data;
     }
@@ -523,60 +642,15 @@ void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width,
   }
 }
 
-/**
- * @brief       在图片上画点
- * @param       image_addr:RGB565图片起始地址
- * @param       image_width:图片宽度
- * @param       x,y:点的坐标
- * @param       color:点的颜色
- * @retval      无
- */
 void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width,
                              uint16_t x, uint16_t y, uint16_t color) {
-  if (x > 319)
-    x = 319;
-  if (y > 239)
-    y = 239;
-
+  if (x > 319) x = 319;
+  if (y > 239) y = 239;
   *(image_addr + y * image_width + x) = color;
 }
 
-// --- 小球识别部分相关函数与宏 ---
+/* ---------------- 形态学、连通域等函数 ---------------- */
 
-/**
- * @brief       将8位灰度图像转换为RGB565格式的图像
- * @param       gray: 输入，指向源8位灰度图像数据的指针
- * @param       rgb565: 输出，指向目标16位RGB565图像缓冲区的指针
- * @param       width: 图像的宽度（像素）
- * @param       height: 图像的高度（像素）
- */
-void gray_to_rgb565(const uint8_t *gray, uint8_t *rgb565, int width,
-                    int height) {
-  if (gray == NULL || rgb565 == NULL) {
-    return;
-  }
-
-  uint32_t num_pixels = (uint32_t)width * height;
-  const uint8_t *p_src = gray;
-  uint16_t *p_dst = (uint16_t *)rgb565;
-
-  for (uint32_t i = 0; i < num_pixels; i++) {
-    uint8_t gray_value = p_src[i];
-    uint16_t r5 = gray_value >> 3;
-    uint16_t g6 = gray_value >> 2;
-    uint16_t b5 = gray_value >> 3;
-    p_dst[i] = (r5 << 11) | (g6 << 5) | b5;
-  }
-}
-
-/**
- * @brief       对二值图像进行腐蚀操作
- * @param       src:         源二值图像数据
- * @param       dst:         目标二值图像缓冲区
- * @param       width:       图像宽度
- * @param       height:      图像高度
- * @param       kernel_size: 结构元素大小（奇数，如3, 5）
- */
 void image_binary_erode(const uint8_t *src, uint8_t *dst, int width, int height,
                         int kernel_size) {
   int half_k = kernel_size / 2;
@@ -590,22 +664,13 @@ void image_binary_erode(const uint8_t *src, uint8_t *dst, int width, int height,
             break;
           }
         }
-        if (!is_eroded)
-          break;
+        if (!is_eroded) break;
       }
       dst[y * width + x] = is_eroded ? 255 : 0;
     }
   }
 }
 
-/**
- * @brief       对二值图像进行膨胀操作
- * @param       src:         源二值图像数据
- * @param       dst:         目标二值图像缓冲区
- * @param       width:       图像宽度
- * @param       height:      图像高度
- * @param       kernel_size: 结构元素大小（奇数，如3, 5）
- */
 void image_binary_dilate(const uint8_t *src, uint8_t *dst, int width,
                          int height, int kernel_size) {
   int half_k = kernel_size / 2;
@@ -619,105 +684,61 @@ void image_binary_dilate(const uint8_t *src, uint8_t *dst, int width,
             break;
           }
         }
-        if (is_dilated)
-          break;
+        if (is_dilated) break;
       }
       dst[y * width + x] = is_dilated ? 255 : 0;
     }
   }
 }
 
-/**
- * @brief       对二值图像进行开运算（先腐蚀后膨胀），用于去噪
- * @param       binary_img:  要处理的二值图像数据（会被就地修改）
- * @param       width:       图像宽度
- * @param       height:      图像高度
- * @param       kernel_size: 结构元素大小（建议为3）
- */
 void image_binary_open(uint8_t *binary_img, int width, int height,
                        int kernel_size) {
-  // K210内存有限，为了节约内存，我们需要一个临时缓冲区
-  uint8_t *temp_buf = (uint8_t *)malloc(width * height);
+  uint8_t *temp_buf = (uint8_t *)malloc((size_t)width * (size_t)height);
   if (temp_buf == NULL) {
     printf("Failed to allocate temp buffer for morph open\n");
     return;
   }
-  memset(temp_buf, 0, (size_t)width * height);
-  // 1. 腐蚀: binary_img -> temp_buf
+  memset(temp_buf, 0, (size_t)width * (size_t)height);
   image_binary_erode(binary_img, temp_buf, width, height, kernel_size);
-
-  // 2. 膨胀: temp_buf -> binary_img
   image_binary_dilate(temp_buf, binary_img, width, height, kernel_size);
-
   free(temp_buf);
 }
 
-/**
- * @brief       对二值图像进行闭运算（先膨胀后腐蚀），用于填充小孔
- * @param       binary_img:  要处理的二值图像数据（会被就地修改）
- * @param       width:       图像宽度
- * @param       height:      图像高度
- * @param       kernel_size: 结构元素大小（建议为3）
- */
 void image_binary_close(uint8_t *binary_img, int width, int height,
                         int kernel_size) {
-  // K210内存有限，为了节约内存，我们需要一个临时缓冲区
-  uint8_t *temp_buf = (uint8_t *)malloc(width * height);
+  uint8_t *temp_buf = (uint8_t *)malloc((size_t)width * (size_t)height);
   if (temp_buf == NULL) {
     printf("Failed to allocate temp buffer for morph close\n");
     return;
   }
-  memset(temp_buf, 0, (size_t)width * height);
-  // 1. 膨胀: binary_img -> temp_buf
+  memset(temp_buf, 0, (size_t)width * (size_t)height);
   image_binary_dilate(binary_img, temp_buf, width, height, kernel_size);
-
-  // 2. 腐蚀: temp_buf -> binary_img
   image_binary_erode(temp_buf, binary_img, width, height, kernel_size);
-
   free(temp_buf);
 }
 
-// --- 并查集辅助函数 ---
-// 查找根节点，并进行路径压缩
 static int find_root(int *parent, int i) {
-  if (parent[i] == i)
-    return i;
-  parent[i] = find_root(parent, parent[i]); // 路径压缩
+  if (parent[i] == i) return i;
+  parent[i] = find_root(parent, parent[i]);
   return parent[i];
 }
-// 合并两个集合
 static void union_sets(int *parent, int i, int j) {
   int root_i = find_root(parent, i);
   int root_j = find_root(parent, j);
   if (root_i != root_j) {
-    // 将较小的根作为父节点
-    if (root_i < root_j)
-      parent[root_j] = root_i;
-    else
-      parent[root_i] = root_j;
+    if (root_i < root_j) parent[root_j] = root_i;
+    else parent[root_i] = root_j;
   }
 }
-// --- 并查集结束 ---
 
-/**
- * @brief       在二值图像中查找连通域（Blobs）
- * @param       binary_img:  输入的二值图像 (255为前景, 0为背景)
- * @param       width:       图像宽度
- * @param       height:      图像高度
- * @param       blobs:       用于存储找到的Blob信息的数组
- * @param       max_blobs:   blobs数组的最大容量
- * @retval      找到的Blob数量
- */
 int find_blobs(const uint8_t *binary_img, int width, int height,
                BlobInfo *blobs, int max_blobs) {
-  int *labels = (int *)malloc(width * height * sizeof(int));
-  if (labels == NULL)
-    return 0;
-  memset(labels, 0, width * height * sizeof(int));
+  int *labels = (int *)malloc((size_t)width * (size_t)height * sizeof(int));
+  if (labels == NULL) return 0;
+  memset(labels, 0, (size_t)width * (size_t)height * sizeof(int));
 
-  // 假设标签数量不会超过图像像素的1/4
-  int max_labels = width * height / 4;
-  int *parent = (int *)malloc(max_labels * sizeof(int));
+  int max_labels = (width * height) / 4;
+  int *parent = (int *)malloc((size_t)max_labels * sizeof(int));
   if (parent == NULL) {
     free(labels);
     return 0;
@@ -725,25 +746,24 @@ int find_blobs(const uint8_t *binary_img, int width, int height,
 
   int next_label = 1;
 
-  // --- 第一遍扫描 ---
   for (int y = 1; y < height; y++) {
     for (int x = 1; x < width; x++) {
       if (binary_img[y * width + x] == 255) {
         int up = labels[(y - 1) * width + x];
         int left = labels[y * width + (x - 1)];
 
-        if (up == 0 && left == 0) { // 新区域
+        if (up == 0 && left == 0) {
           labels[y * width + x] = next_label;
           parent[next_label] = next_label;
           next_label++;
-          if (next_label >= max_labels) { // 标签池耗尽
+          if (next_label >= max_labels) {
             goto end_pass1;
           }
-        } else if (up != 0 && left == 0) { // 继承上方
+        } else if (up != 0 && left == 0) {
           labels[y * width + x] = up;
-        } else if (up == 0 && left != 0) { // 继承左方
+        } else if (up == 0 && left != 0) {
           labels[y * width + x] = left;
-        } else { // 上方和左方都有
+        } else {
           labels[y * width + x] = (up < left) ? up : left;
           if (up != left) {
             union_sets(parent, up, left);
@@ -754,45 +774,33 @@ int find_blobs(const uint8_t *binary_img, int width, int height,
   }
 end_pass1:;
 
-  // --- 第二遍扫描 + 信息统计 ---
-  // 初始化Blob信息
   for (int i = 0; i < max_blobs; i++) {
-    blobs[i] = (BlobInfo){.id = i,
-                          .pixel_count = 0,
-                          .min_x = width,
-                          .min_y = height,
-                          .max_x = -1,
-                          .max_y = -1};
+    blobs[i] = (BlobInfo){.id = i, .pixel_count = 0, .min_x = width, .min_y = height, .max_x = -1, .max_y = -1};
   }
 
   for (int y = 0; y < height; y++) {
     for (int x = 0; x < width; x++) {
       if (labels[y * width + x] != 0) {
         int root = find_root(parent, labels[y * width + x]);
-        labels[y * width + x] = root; // 更新为根标签
-
+        labels[y * width + x] = root;
         if (root < max_blobs) {
           blobs[root].pixel_count++;
-          if (x < blobs[root].min_x)
-            blobs[root].min_x = x;
-          if (y < blobs[root].min_y)
-            blobs[root].min_y = y;
-          if (x > blobs[root].max_x)
-            blobs[root].max_x = x;
-          if (y > blobs[root].max_y)
-            blobs[root].max_y = y;
+          if (x < blobs[root].min_x) blobs[root].min_x = x;
+          if (y < blobs[root].min_y) blobs[root].min_y = y;
+          if (x > blobs[root].max_x) blobs[root].max_x = x;
+          if (y > blobs[root].max_y) blobs[root].max_y = y;
         }
       }
     }
   }
 
-  // --- 清理和整理结果 ---
   int blob_count = 0;
   for (int i = 1; i < next_label; i++) {
-    // 只保留有实际像素的、根标签对应的Blob
-    if (parent[i] == i && blobs[i].pixel_count > 0) {
-      blobs[blob_count] = blobs[i];
-      blobs[blob_count].id = blob_count + 1; // 重新编号
+    if (parent[i] == i && blobs[i].pixel_count > 0 && blob_count < max_blobs) {
+      if (blob_count != i) {
+          blobs[blob_count] = blobs[i];
+      }
+      blobs[blob_count].id = blob_count + 1;
       blob_count++;
     }
   }

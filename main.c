@@ -11,10 +11,10 @@
 #include "./BSP/UART/uart.h"
 #include "./BSP/KEY/key.h"
 
-// #define DEBUG
+#define DEBUG
 
-#define MAX_BLOBS 100
-#define MIN_BALL_PIXELS 4000
+#define MAX_BLOBS 50
+#define MIN_BALL_PIXELS 7000
 
 void init() {
   sysctl_pll_set_freq(SYSCTL_PLL0, 800000000);
