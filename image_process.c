@@ -796,109 +796,266 @@ void image_binary_close(uint8_t *binary_img, int width, int height,
   free(temp_buf);
 }
 
-static int find_root(int *parent, int i) {
-  if (parent[i] == i)
-    return i;
-  parent[i] = find_root(parent, parent[i]);
-  return parent[i];
+static inline int find_root(int *parent, int x) {
+  // 迭代式路径压缩
+  int root = x;
+  while (parent[root] != root) {
+    root = parent[root];
+  }
+  while (x != root) {
+    int p = parent[x];
+    parent[x] = root;
+    x = p;
+  }
+  return root;
 }
-static void union_sets(int *parent, int i, int j) {
-  int root_i = find_root(parent, i);
-  int root_j = find_root(parent, j);
-  if (root_i != root_j) {
-    if (root_i < root_j)
-      parent[root_j] = root_i;
-    else
-      parent[root_i] = root_j;
+
+static inline void union_sets(int *parent, uint8_t *rank, int a, int b) {
+  int ra = find_root(parent, a);
+  int rb = find_root(parent, b);
+  if (ra == rb)
+    return;
+  if (rank[ra] < rank[rb]) {
+    parent[ra] = rb;
+  } else if (rank[ra] > rank[rb]) {
+    parent[rb] = ra;
+  } else {
+    parent[rb] = ra;
+    rank[ra]++;
   }
 }
 
 int find_blobs(const uint8_t *binary_img, int width, int height,
                BlobInfo *blobs, int max_blobs) {
-  int *labels = (int *)malloc((size_t)width * (size_t)height * sizeof(int));
-  if (labels == NULL)
+  if (!binary_img || !blobs || width <= 0 || height <= 0 || max_blobs <= 0) {
     return 0;
-  memset(labels, 0, (size_t)width * (size_t)height * sizeof(int));
+  }
 
-  int max_labels = (width * height) / 4;
+  const int W = width;
+  const int H = height;
+  const size_t N = (size_t)W * (size_t)H;
+
+  // labels: 每像素 32 位标签（避免 320x240 超过 65535 的上限）
+  int *labels = (int *)malloc(N * sizeof(int));
+  if (!labels)
+    return 0;
+  memset(labels, 0, N * sizeof(int));
+
+  // 上限估计：checkerboard 最坏情况下的等价类近似 W*H/2
+  // 原实现使用了 /4，可能在碎片多时不够稳妥；这里使用 /2
+  // 并在需要时增长:contentReference[oaicite:3]{index=3}
+  int max_labels = (int)(N / 2) + 16;
+  if (max_labels < 1024)
+    max_labels = 1024; // 给小图一个最小空间
+
   int *parent = (int *)malloc((size_t)max_labels * sizeof(int));
-  if (parent == NULL) {
+  uint8_t *rank = (uint8_t *)malloc((size_t)max_labels * sizeof(uint8_t));
+  if (!parent || !rank) {
     free(labels);
+    if (parent)
+      free(parent);
+    if (rank)
+      free(rank);
     return 0;
   }
 
+  // 初始化并查集
   int next_label = 1;
+  parent[0] = 0;
+  rank[0] = 0;
 
-  for (int y = 1; y < height; y++) {
-    for (int x = 1; x < width; x++) {
-      if (binary_img[y * width + x] == 255) {
-        int up = labels[(y - 1) * width + x];
-        int left = labels[y * width + (x - 1)];
+  // -------- Pass 1：扫描 + 初始赋标 + 建立等价关系（8 邻域） --------
+  for (int y = 0; y < H; ++y) {
+    const int yW = y * W;
+    for (int x = 0; x < W; ++x) {
+      const int idx = yW + x;
+      if (binary_img[idx] != 255) {
+        // 背景像素
+        continue;
+      }
 
-        if (up == 0 && left == 0) {
-          labels[y * width + x] = next_label;
-          parent[next_label] = next_label;
-          next_label++;
-          if (next_label >= max_labels) {
-            goto end_pass1;
+      int nlabels[4]; // 收集上、左上、上右、左的已赋非零标签
+      int ncnt = 0;
+
+      // 上 (y-1,x)
+      if (y > 0) {
+        int t = labels[(y - 1) * W + x];
+        if (t)
+          nlabels[ncnt++] = t;
+      }
+      // 左 (y,x-1)
+      if (x > 0) {
+        int t = labels[yW + (x - 1)];
+        if (t)
+          nlabels[ncnt++] = t;
+      }
+      // 左上 (y-1,x-1)
+      if (y > 0 && x > 0) {
+        int t = labels[(y - 1) * W + (x - 1)];
+        if (t)
+          nlabels[ncnt++] = t;
+      }
+      // 右上 (y-1,x+1)
+      if (y > 0 && x < (W - 1)) {
+        int t = labels[(y - 1) * W + (x + 1)];
+        if (t)
+          nlabels[ncnt++] = t;
+      }
+
+      if (ncnt == 0) {
+        // 分配新标签
+        if (next_label >= max_labels) {
+          // 扩容 parent / rank
+          int new_cap = max_labels * 3 / 2 + 1024;
+          int *new_parent =
+              (int *)realloc(parent, (size_t)new_cap * sizeof(int));
+          uint8_t *new_rank =
+              (uint8_t *)realloc(rank, (size_t)new_cap * sizeof(uint8_t));
+          if (!new_parent || !new_rank) {
+            // 内存不足，提前退出：尽可能返回已有结果
+            free(labels);
+            if (new_parent)
+              free(new_parent);
+            if (new_rank)
+              free(new_rank);
+            free(parent);
+            free(rank);
+            return 0;
           }
-        } else if (up != 0 && left == 0) {
-          labels[y * width + x] = up;
-        } else if (up == 0 && left != 0) {
-          labels[y * width + x] = left;
-        } else {
-          labels[y * width + x] = (up < left) ? up : left;
-          if (up != left) {
-            union_sets(parent, up, left);
+          parent = new_parent;
+          rank = new_rank;
+          max_labels = new_cap;
+        }
+        labels[idx] = next_label;
+        parent[next_label] = next_label;
+        rank[next_label] = 0;
+        next_label++;
+      } else {
+        // 选择最小的根标签作为当前像素标签，并将其它等价
+        int min_root = find_root(parent, nlabels[0]);
+        for (int k = 1; k < ncnt; ++k) {
+          int rk = find_root(parent, nlabels[k]);
+          if (rk != min_root) {
+            if (rk < min_root) {
+              union_sets(parent, rank, min_root, rk);
+              min_root = find_root(parent, min_root);
+            } else {
+              union_sets(parent, rank, rk, min_root);
+              min_root = find_root(parent, min_root);
+            }
           }
         }
+        labels[idx] = min_root;
       }
     }
   }
-end_pass1:;
 
-  for (int i = 0; i < max_blobs; i++) {
-    blobs[i] = (BlobInfo){.id = i,
-                          .pixel_count = 0,
-                          .min_x = width,
-                          .min_y = height,
-                          .max_x = -1,
-                          .max_y = -1};
+  // 如果没有前景像素
+  if (next_label == 1) {
+    free(labels);
+    free(parent);
+    free(rank);
+    return 0;
   }
 
-  for (int y = 0; y < height; y++) {
-    for (int x = 0; x < width; x++) {
-      if (labels[y * width + x] != 0) {
-        int root = find_root(parent, labels[y * width + x]);
-        labels[y * width + x] = root;
-        if (root < max_blobs) {
-          blobs[root].pixel_count++;
-          if (x < blobs[root].min_x)
-            blobs[root].min_x = x;
-          if (y < blobs[root].min_y)
-            blobs[root].min_y = y;
-          if (x > blobs[root].max_x)
-            blobs[root].max_x = x;
-          if (y > blobs[root].max_y)
-            blobs[root].max_y = y;
-        }
-      }
+  // -------- 压缩：为每个最终根分配紧凑 ID，并统计特征 --------
+  const int L = next_label; // 实际出现的标签上界（开区间）
+  int *root_map =
+      (int *)malloc((size_t)L * sizeof(int)); // root -> 紧凑 id（1..k）
+  if (!root_map) {
+    free(labels);
+    free(parent);
+    free(rank);
+    return 0;
+  }
+  memset(root_map, 0, (size_t)L * sizeof(int));
+
+  // 统计容器：按 root 索引（先用 root 直接索引，稍后再压缩到 blobs）
+  int *pix_cnt = (int *)calloc((size_t)L, sizeof(int));
+  int *min_x = (int *)malloc((size_t)L * sizeof(int));
+  int *min_y = (int *)malloc((size_t)L * sizeof(int));
+  int *max_x = (int *)malloc((size_t)L * sizeof(int));
+  int *max_y = (int *)malloc((size_t)L * sizeof(int));
+  if (!pix_cnt || !min_x || !min_y || !max_x || !max_y) {
+    free(labels);
+    free(parent);
+    free(rank);
+    free(root_map);
+    if (pix_cnt)
+      free(pix_cnt);
+    if (min_x)
+      free(min_x);
+    if (min_y)
+      free(min_y);
+    if (max_x)
+      free(max_x);
+    if (max_y)
+      free(max_y);
+    return 0;
+  }
+
+  for (int i = 0; i < L; ++i) {
+    min_x[i] = 0x7FFFFFFF;
+    min_y[i] = 0x7FFFFFFF;
+    max_x[i] = -0x7FFFFFFF;
+    max_y[i] = -0x7FFFFFFF;
+  }
+
+  // Pass 2：压根 + 累计统计
+  for (int y = 0; y < H; ++y) {
+    const int yW = y * W;
+    for (int x = 0; x < W; ++x) {
+      const int idx = yW + x;
+      int lab = labels[idx];
+      if (!lab)
+        continue;
+      int r = find_root(parent, lab);
+      labels[idx] = r; // 写回根，便于后续可能使用
+
+      pix_cnt[r] += 1;
+      if (x < min_x[r])
+        min_x[r] = x;
+      if (y < min_y[r])
+        min_y[r] = y;
+      if (x > max_x[r])
+        max_x[r] = x;
+      if (y > max_y[r])
+        max_y[r] = y;
     }
   }
 
+  // 将非空的 root 映射为紧凑 ID，并写入输出 blobs（最多 max_blobs 个）
   int blob_count = 0;
-  for (int i = 1; i < next_label; i++) {
-    if (parent[i] == i && blobs[i].pixel_count > 0 && blob_count < max_blobs) {
-      if (blob_count != i) {
-        blobs[blob_count] = blobs[i];
-      }
-      blobs[blob_count].id = blob_count + 1;
-      blob_count++;
+  for (int r = 1; r < L && blob_count < max_blobs; ++r) {
+    if (pix_cnt[r] > 0) {
+      // 压缩为 [1..blob_count]
+      root_map[r] = blob_count + 1;
+
+      BlobInfo bi;
+      bi.id =
+          blob_count +
+          1; // 1 起始
+             // ID（与原实现保持一致习惯）:contentReference[oaicite:4]{index=4}
+      bi.pixel_count = pix_cnt[r];
+      bi.min_x = (min_x[r] == 0x7FFFFFFF) ? 0 : min_x[r];
+      bi.min_y = (min_y[r] == 0x7FFFFFFF) ? 0 : min_y[r];
+      bi.max_x = (max_x[r] == -0x7FFFFFFF) ? 0 : max_x[r];
+      bi.max_y = (max_y[r] == -0x7FFFFFFF) ? 0 : max_y[r];
+
+      blobs[blob_count++] = bi;
     }
   }
 
+  // 释放内存
   free(labels);
   free(parent);
+  free(rank);
+  free(root_map);
+  free(pix_cnt);
+  free(min_x);
+  free(min_y);
+  free(max_x);
+  free(max_y);
 
   return blob_count;
 }

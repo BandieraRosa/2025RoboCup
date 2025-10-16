@@ -32,7 +32,8 @@ void init() {
   camera_init(0);
   camera_set_pixformat(PIXFORMAT_RGB565);
   camera_set_framesize(CAMERA_WIDTH, CAMERA_HEIGHT);
-  camera_set_hmirror(1);
+  camera_set_hmirror(0);
+  camera_set_vflip(0);
   camera_set_light(1);
 }
 
@@ -140,7 +141,6 @@ int main(void) {
       if (ball_found) {
         int red_in_blob = 0, blue_in_blob = 0;
 
-        // 安全裁剪（避免越界）
         int x1 = largest_blob.min_x < 0 ? 0 : largest_blob.min_x;
         int y1 = largest_blob.min_y < 0 ? 0 : largest_blob.min_y;
         int x2 = largest_blob.max_x > (CAMERA_WIDTH - 1) ? (CAMERA_WIDTH - 1)
