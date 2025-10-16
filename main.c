@@ -16,6 +16,42 @@
 
 #define MAX_BLOBS 50
 
+/* ---------------- LUT 与分类器 ---------------- */
+
+static uint8_t R5_TO_8[32];
+static uint8_t G6_TO_8[64];
+static uint8_t B5_TO_8[32];
+
+static inline void rgb565_luts_init(void) {
+  for (int v = 0; v < 32; ++v) {
+    R5_TO_8[v] = (uint8_t)((v << 3) | (v >> 2));
+    B5_TO_8[v] = (uint8_t)((v << 3) | (v >> 2));
+  }
+  for (int v = 0; v < 64; ++v) {
+    G6_TO_8[v] = (uint8_t)((v << 2) | (v >> 4));
+  }
+}
+
+static inline uint8_t classify_rgb565(uint16_t p) {
+  uint8_t r = R5_TO_8[(p >> 11) & 0x1F];
+  uint8_t g = G6_TO_8[(p >> 5) & 0x3F];
+  uint8_t b = B5_TO_8[p & 0x1F];
+
+  uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+  uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+  uint8_t sat = (uint8_t)(max_c - min_c);
+
+  if (sat < SATURATION_THRESHOLD || max_c < BRIGHTNESS_THRESHOLD)
+    return 0;
+  if ((int)r > (int)b + COLOR_DIFF_THRESHOLD && r > g)
+    return 1;
+  if ((int)b > (int)r + COLOR_DIFF_THRESHOLD && b > g)
+    return 2;
+  return 0;
+}
+
+/* --------------------------------------------------------------------------*/
+
 void init() {
   sysctl_pll_set_freq(SYSCTL_PLL0, 800000000);
   sysctl_pll_set_freq(SYSCTL_PLL1, 400000000);
@@ -35,11 +71,13 @@ void init() {
   camera_set_hmirror(0);
   camera_set_vflip(0);
   camera_set_light(1);
+  rgb565_luts_init();
 }
 
 #ifdef DEBUG
 int main(void) {
   init();
+
   uint8_t *binary_buf = (uint8_t *)malloc(CAMERA_WIDTH * CAMERA_HEIGHT);
   if (binary_buf == NULL) {
     printf("Error: Failed to allocate binary buffer\n");
@@ -50,6 +88,14 @@ int main(void) {
   if (debug_buf == NULL) {
     printf("Error: Failed to allocate debug buffer\n");
     free(binary_buf);
+    return -1;
+  }
+
+  uint8_t *color_buf = (uint8_t *)malloc(CAMERA_WIDTH * CAMERA_HEIGHT);
+  if (color_buf == NULL) {
+    printf("Error: Failed to allocate color buffer\n");
+    free(binary_buf);
+    free(debug_buf);
     return -1;
   }
 
@@ -70,33 +116,26 @@ int main(void) {
         break;
       }
     }
+
     if (camera_snapshot(&camera_buf, NULL) == 0) {
       uint16_t *pixel_ptr = (uint16_t *)camera_buf;
 
+      const int N = CAMERA_WIDTH * CAMERA_HEIGHT;
+      uint16_t *p = pixel_ptr;
+      uint16_t *p_end = p + N;
+      uint8_t *bin = binary_buf;
+      uint8_t *cbuf = color_buf;
       int red_pixel_count = 0;
       int blue_pixel_count = 0;
 
-      for (int i = 0; i < CAMERA_WIDTH * CAMERA_HEIGHT; i++) {
-        uint16_t pixel_color = pixel_ptr[i];
-        uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;
-        uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;
-        uint8_t b = (pixel_color & 0x001F) << 3;
-
-        uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
-        uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
-        uint8_t sat = max_c - min_c;
-
-        binary_buf[i] = 0;
-
-        if (sat >= SATURATION_THRESHOLD && max_c >= BRIGHTNESS_THRESHOLD) {
-          if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
-            red_pixel_count++;
-            binary_buf[i] = 255;
-          } else if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
-            blue_pixel_count++;
-            binary_buf[i] = 255;
-          }
-        }
+      while (p < p_end) {
+        uint16_t pix = *p++;
+        uint8_t cls = classify_rgb565(pix); // 0/1/2
+        *cbuf++ = cls;
+        uint8_t v = (uint8_t)(cls ? 255 : 0);
+        *bin++ = v;
+        red_pixel_count += (cls == 1);
+        blue_pixel_count += (cls == 2);
       }
 
       image_binary_open(binary_buf, CAMERA_WIDTH, CAMERA_HEIGHT, 5);
@@ -150,35 +189,21 @@ int main(void) {
 
         for (int y = y1; y <= y2; ++y) {
           int base = y * CAMERA_WIDTH;
+          const uint8_t *bin_row = &binary_buf[base];
+          const uint8_t *col_row = &color_buf[base];
           for (int x = x1; x <= x2; ++x) {
-            int idx = base + x;
-
-            if (binary_buf[idx] != 255)
+            if (bin_row[x] != 255)
               continue;
-
-            uint16_t pixel_color = pixel_ptr[idx];
-            uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;
-            uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;
-            uint8_t b = (pixel_color & 0x001F) << 3;
-
-            uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
-            uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
-            uint8_t sat = max_c - min_c;
-
-            if (sat >= SATURATION_THRESHOLD && max_c >= BRIGHTNESS_THRESHOLD) {
-              if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
-                red_in_blob++;
-              } else if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
-                blue_in_blob++;
-              }
-            }
+            uint8_t c = col_row[x];
+            red_in_blob += (c == 1);
+            blue_in_blob += (c == 2);
           }
         }
 
         int red =
-            red_in_blob + blue_in_blob > 0 ? red_in_blob : red_pixel_count;
+            (red_in_blob + blue_in_blob > 0) ? red_in_blob : red_pixel_count;
         int blue =
-            red_in_blob + blue_in_blob > 0 ? blue_in_blob : blue_pixel_count;
+            (red_in_blob + blue_in_blob > 0) ? blue_in_blob : blue_pixel_count;
 
         const char *color_str = (red > blue) ? "RED" : "BLUE";
         sprintf(status_msg, "Ball: %s | Area: %d", color_str,
@@ -220,9 +245,9 @@ int main(void) {
       camera_snapshot_release();
     }
   }
-
   free(binary_buf);
   free(debug_buf);
+  free(color_buf);
   return 0;
 }
 
@@ -236,9 +261,9 @@ int main(void) {
 
       uint16_t center_pixel =
           pixel_ptr[(CAMERA_HEIGHT / 2) * CAMERA_WIDTH + (CAMERA_WIDTH / 2)];
-      uint8_t r = ((center_pixel & 0xF800) >> 11) << 3;
-      uint8_t g = ((center_pixel & 0x07E0) >> 5) << 2;
-      uint8_t b = (center_pixel & 0x001F) << 3;
+      uint8_t r = R5_TO_8[(center_pixel >> 11) & 0x1F];
+      uint8_t g = G6_TO_8[(center_pixel >> 5) & 0x3F];
+      uint8_t b = B5_TO_8[center_pixel & 0x1F];
       printf("Center Pixel: R=%d, G=%d, B=%d\n", r, g, b);
       camera_snapshot_release();
     }
@@ -253,6 +278,14 @@ int main(void) {
   uint8_t *binary_buf = (uint8_t *)malloc(CAMERA_WIDTH * CAMERA_HEIGHT);
   if (binary_buf == NULL) {
     printf("Error: Failed to allocate binary buffer\n");
+    return -1;
+  }
+
+  /* 新增：颜色缓存 */
+  uint8_t *color_buf = (uint8_t *)malloc(CAMERA_WIDTH * CAMERA_HEIGHT);
+  if (color_buf == NULL) {
+    printf("Error: Failed to allocate color buffer\n");
+    free(binary_buf);
     return -1;
   }
 
@@ -276,30 +309,23 @@ int main(void) {
     if (camera_snapshot(&camera_buf, NULL) == 0) {
       uint16_t *pixel_ptr = (uint16_t *)camera_buf;
 
+      /* ---- 单趟线性扫描：分类 + 计数 + 生成二值图/颜色缓存 ---- */
+      const int N = CAMERA_WIDTH * CAMERA_HEIGHT;
+      uint16_t *p = pixel_ptr;
+      uint16_t *p_end = p + N;
+      uint8_t *bin = binary_buf;
+      uint8_t *cbuf = color_buf;
       int red_pixel_count = 0;
       int blue_pixel_count = 0;
 
-      for (int i = 0; i < CAMERA_WIDTH * CAMERA_HEIGHT; i++) {
-        uint16_t pixel_color = pixel_ptr[i];
-        uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;
-        uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;
-        uint8_t b = (pixel_color & 0x001F) << 3;
-
-        uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
-        uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
-        uint8_t sat = max_c - min_c;
-
-        binary_buf[i] = 0;
-
-        if (sat >= SATURATION_THRESHOLD && max_c >= BRIGHTNESS_THRESHOLD) {
-          if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
-            red_pixel_count++;
-            binary_buf[i] = 255;
-          } else if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
-            blue_pixel_count++;
-            binary_buf[i] = 255;
-          }
-        }
+      while (p < p_end) {
+        uint16_t pix = *p++;
+        uint8_t cls = classify_rgb565(pix); // 0/1/2
+        *cbuf++ = cls;
+        uint8_t v = (uint8_t)(cls ? 255 : 0);
+        *bin++ = v;
+        red_pixel_count += (cls == 1);
+        blue_pixel_count += (cls == 2);
       }
 
       image_binary_open(binary_buf, CAMERA_WIDTH, CAMERA_HEIGHT, 5);
@@ -335,8 +361,35 @@ int main(void) {
       }
 
       if (ball_found) {
-        enum COLOR color =
-            (red_pixel_count > blue_pixel_count) ? BALL_RED : BALL_BLUE;
+        /* ROI 内直接统计颜色（避免二次解码） */
+        int red_in_blob = 0, blue_in_blob = 0;
+
+        int x1 = largest_blob.min_x < 0 ? 0 : largest_blob.min_x;
+        int y1 = largest_blob.min_y < 0 ? 0 : largest_blob.min_y;
+        int x2 = largest_blob.max_x > (CAMERA_WIDTH - 1) ? (CAMERA_WIDTH - 1)
+                                                         : largest_blob.max_x;
+        int y2 = largest_blob.max_y > (CAMERA_HEIGHT - 1) ? (CAMERA_HEIGHT - 1)
+                                                          : largest_blob.max_y;
+
+        for (int y = y1; y <= y2; ++y) {
+          int base = y * CAMERA_WIDTH;
+          const uint8_t *bin_row = &binary_buf[base];
+          const uint8_t *col_row = &color_buf[base];
+          for (int x = x1; x <= x2; ++x) {
+            if (bin_row[x] != 255)
+              continue;
+            uint8_t c = col_row[x];
+            red_in_blob += (c == 1);
+            blue_in_blob += (c == 2);
+          }
+        }
+
+        enum COLOR color = ((red_in_blob + blue_in_blob > 0)
+                                ? (red_in_blob > blue_in_blob)
+                                : (red_pixel_count > blue_pixel_count))
+                               ? BALL_RED
+                               : BALL_BLUE;
+
         uint8_t response = 0x00;
         if (color == BALL_RED) {
           response = 0x01;
@@ -364,7 +417,9 @@ int main(void) {
     }
   }
 
+  /* （理论上不可达） */
   free(binary_buf);
+  free(color_buf);
   return 0;
 }
 

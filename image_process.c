@@ -728,48 +728,283 @@ void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width,
 
 /* ---------------- 形态学、连通域等函数 ---------------- */
 
-void image_binary_erode(const uint8_t *src, uint8_t *dst, int width, int height,
-                        int kernel_size) {
-  int half_k = kernel_size / 2;
-  for (int y = half_k; y < height - half_k; y++) {
-    for (int x = half_k; x < width - half_k; x++) {
-      int is_eroded = 1;
-      for (int ky = -half_k; ky <= half_k; ky++) {
-        for (int kx = -half_k; kx <= half_k; kx++) {
-          if (src[(y + ky) * width + (x + kx)] == 0) {
-            is_eroded = 0;
-            break;
-          }
-        }
-        if (!is_eroded)
-          break;
+static inline int clamp_kernel_size(int k) {
+  if (k < 1)
+    k = 1;
+  if ((k & 1) == 0)
+    k += 1; // force odd
+  return k;
+}
+
+static void morph_separable(const uint8_t *src, uint8_t *dst, int W, int H,
+                            int k, int is_dilate) {
+  k = clamp_kernel_size(k);
+  const int hk = k >> 1;
+  uint8_t *rowbuf = (uint8_t *)malloc((size_t)W);
+  uint8_t *ringbuf = (uint8_t *)malloc((size_t)W * (size_t)k);
+  int *colsum = (int *)malloc((size_t)W * sizeof(int));
+  if (!rowbuf || !ringbuf || !colsum) {
+    if (rowbuf)
+      free(rowbuf);
+    if (ringbuf)
+      free(ringbuf);
+    if (colsum)
+      free(colsum);
+    memset(dst, 0, (size_t)W * (size_t)H);
+    return;
+  }
+  memset(dst, 0, (size_t)W * (size_t)H);
+  memset(ringbuf, 0, (size_t)W * (size_t)k);
+  memset(colsum, 0, (size_t)W * sizeof(int));
+
+  for (int y = 0; y < H; ++y) {
+    const uint8_t *srow = src + (size_t)y * (size_t)W;
+
+    /* 横向滚动计数（把 255 当作 1） */
+    int run = 0;
+    for (int x = 0; x < W; ++x) {
+      run += (srow[x] != 0);
+      if (x >= k)
+        run -= (srow[x - k] != 0);
+      uint8_t out = 0;
+      if (x >= k - 1) {
+        if (is_dilate)
+          out = (run > 0);
+        else
+          out = (run == k);
+        int xc = x - hk;
+        if (xc >= 0 && xc < W)
+          rowbuf[xc] = out;
       }
-      dst[y * width + x] = is_eroded ? 255 : 0;
     }
+
+    uint8_t *slot = ringbuf + (size_t)(y % k) * (size_t)W;
+    if (y >= k) {
+      const uint8_t *old = ringbuf + (size_t)((y - k) % k) * (size_t)W;
+      for (int x = 0; x < W; ++x)
+        colsum[x] -= old[x];
+    }
+    for (int x = 0; x < W; ++x) {
+      slot[x] = rowbuf[x];
+      colsum[x] += rowbuf[x];
+    }
+
+    if (y >= k - 1) {
+      int yc = y - hk;
+      if (yc >= hk && yc < H - hk) {
+        uint8_t *drow = dst + (size_t)yc * (size_t)W;
+        for (int x = hk; x < W - hk; ++x) {
+          drow[x] = (is_dilate ? (colsum[x] > 0) : (colsum[x] == k)) ? 255 : 0;
+        }
+      }
+    }
+  }
+
+  free(rowbuf);
+  free(ringbuf);
+  free(colsum);
+}
+
+/* ------------------------ 3×3：位操作/极简缓冲 ------------------------ */
+/* 思路：先对每行做 3 点 OR/AND，得到 h(x)；保留最近 3 行 h 到环缓，纵向再
+ * OR/AND 三行。*/
+static void morph_3(const uint8_t *src, uint8_t *dst, int W, int H,
+                    int is_dilate) {
+  if (!src || !dst || W <= 0 || H <= 0)
+    return;
+  const int hk = 1; // 3x3
+  uint8_t *hbuf0 = (uint8_t *)malloc((size_t)W);
+  uint8_t *hbuf1 = (uint8_t *)malloc((size_t)W);
+  uint8_t *hbuf2 = (uint8_t *)malloc((size_t)W);
+  if (!hbuf0 || !hbuf1 || !hbuf2) {
+    if (hbuf0)
+      free(hbuf0);
+    if (hbuf1)
+      free(hbuf1);
+    if (hbuf2)
+      free(hbuf2);
+    memset(dst, 0, (size_t)W * (size_t)H);
+    return;
+  }
+  memset(dst, 0, (size_t)W * (size_t)H);
+
+  uint8_t *ring[3] = {hbuf0, hbuf1, hbuf2};
+  int rhead = 0;
+
+  for (int y = 0; y < H; ++y) {
+    const uint8_t *srow = src + (size_t)y * (size_t)W;
+    uint8_t *hrow = ring[rhead];
+
+    hrow[0] = 0;
+    hrow[W - 1] = 0;
+    if (is_dilate) {
+      for (int x = 1; x < W - 1; ++x)
+        hrow[x] = (srow[x - 1] | srow[x] | srow[x + 1]) ? 1 : 0;
+    } else {
+      for (int x = 1; x < W - 1; ++x)
+        hrow[x] = (srow[x - 1] & srow[x] & srow[x + 1]) ? 1 : 0;
+    }
+
+    if (y >= 2) {
+      int yc = y - hk;
+      uint8_t *drow = dst + (size_t)yc * (size_t)W;
+      /* 仅对内区写值（边界清零） */
+      for (int x = 1; x < W - 1; ++x) {
+        uint8_t v;
+        if (is_dilate)
+          v = (ring[(rhead + 1) % 3][x] | ring[(rhead + 2) % 3][x] |
+               ring[rhead][x])
+                  ? 255
+                  : 0;
+        else
+          v = (ring[(rhead + 1) % 3][x] & ring[(rhead + 2) % 3][x] &
+               ring[rhead][x])
+                  ? 255
+                  : 0;
+        drow[x] = v;
+      }
+    }
+    rhead = (rhead + 1) % 3;
+  }
+
+  free(hbuf0);
+  free(hbuf1);
+  free(hbuf2);
+}
+
+static inline void dilate_3(const uint8_t *s, uint8_t *d, int W, int H) {
+  morph_3(s, d, W, H, 1);
+}
+static inline void erode_3(const uint8_t *s, uint8_t *d, int W, int H) {
+  morph_3(s, d, W, H, 0);
+}
+
+/* ------------------------ 5×5：滚动计数/环缓（O(W·H)）
+ * ------------------------ */
+/* 横向：窗口宽 5 的布尔计数（把 255 当作 1），得到 hrow(x)（0/1）；
+ * 纵向：对 hrow 做列计数（窗口高 5），得到最终 0/255。
+ */
+static void morph_5(const uint8_t *src, uint8_t *dst, int W, int H,
+                    int is_dilate) {
+  if (!src || !dst || W <= 0 || H <= 0)
+    return;
+  const int hk = 2; // 5x5
+
+  uint8_t *ring = (uint8_t *)malloc((size_t)W * 5); // 保存 5 行横向结果（0/1）
+  int *vsum = (int *)malloc((size_t)W * sizeof(int)); // 列窗口 5 的计数
+  if (!ring || !vsum) {
+    if (ring)
+      free(ring);
+    if (vsum)
+      free(vsum);
+    memset(dst, 0, (size_t)W * (size_t)H);
+    return;
+  }
+  memset(dst, 0, (size_t)W * (size_t)H);
+  memset(ring, 0, (size_t)W * 5);
+  memset(vsum, 0, (size_t)W * sizeof(int));
+
+  for (int y = 0; y < H; ++y) {
+    const uint8_t *srow = src + (size_t)y * (size_t)W;
+    uint8_t *hrow = ring + (size_t)(y % 5) * (size_t)W;
+
+    /* 横向滚动计数（宽 5）；边界列清零 */
+    memset(hrow, 0, (size_t)W);
+    int run = 0;
+    for (int x = 0; x < W; ++x) {
+      run += (srow[x] != 0);
+      if (x >= 5)
+        run -= (srow[x - 5] != 0);
+      if (x >= 4) {
+        int xc = x - hk;
+        if (xc >= 0 && xc < W) {
+          if (is_dilate)
+            hrow[xc] = (run > 0); // 任一为 1
+          else
+            hrow[xc] = (run == 5); // 全为 1
+        }
+      }
+    }
+    /* 清边界 */
+    if (W > 0) {
+      hrow[0] = 0;
+      hrow[W - 1] = 0;
+    }
+    if (W > 1) {
+      hrow[1] = 0;
+      hrow[W - 2] = 0;
+    }
+
+    /* 纵向列计数窗口 5：先移除挤出行，再加入当前行 */
+    if (y >= 5) {
+      const uint8_t *old = ring + (size_t)((y - 5) % 5) * (size_t)W;
+      for (int x = 0; x < W; ++x)
+        vsum[x] -= old[x];
+    }
+    for (int x = 0; x < W; ++x)
+      vsum[x] += hrow[x];
+
+    /* 达到 5 行后输出中心行；只写内区（上下左右各留 2 像素为 0） */
+    if (y >= 4) {
+      int yc = y - hk;
+      if (yc >= hk && yc < H - hk) {
+        uint8_t *drow = dst + (size_t)yc * (size_t)W;
+        for (int x = hk; x < W - hk; ++x) {
+          drow[x] = (is_dilate ? (vsum[x] > 0) : (vsum[x] == 5)) ? 255 : 0;
+        }
+      }
+    }
+  }
+
+  free(ring);
+  free(vsum);
+}
+
+/* 语义封装 */
+static inline void dilate_5(const uint8_t *s, uint8_t *d, int W, int H) {
+  morph_5(s, d, W, H, 1);
+}
+static inline void erode_5(const uint8_t *s, uint8_t *d, int W, int H) {
+  morph_5(s, d, W, H, 0);
+}
+
+/* ------------------------ Public APIs (auto-dispatch) ------------------------
+ */
+
+void image_erode(const uint8_t *src, uint8_t *dst, int width, int height,
+                 int kernel_size) {
+  if (!src || !dst || width <= 0 || height <= 0)
+    return;
+  kernel_size = clamp_kernel_size(kernel_size);
+
+  if (kernel_size == 3) {
+    erode_3(src, dst, width, height);
+  } else if (kernel_size == 5) {
+    erode_5(src, dst, width, height);
+  } else {
+    /* 其他尺寸回退到通用可分离实现（窗口 k 的滚动计数） */
+    morph_separable(src, dst, width, height, kernel_size, 0);
   }
 }
 
-void image_binary_dilate(const uint8_t *src, uint8_t *dst, int width,
-                         int height, int kernel_size) {
-  int half_k = kernel_size / 2;
-  for (int y = half_k; y < height - half_k; y++) {
-    for (int x = half_k; x < width - half_k; x++) {
-      int is_dilated = 0;
-      for (int ky = -half_k; ky <= half_k; ky++) {
-        for (int kx = -half_k; kx <= half_k; kx++) {
-          if (src[(y + ky) * width + (x + kx)] == 255) {
-            is_dilated = 1;
-            break;
-          }
-        }
-        if (is_dilated)
-          break;
-      }
-      dst[y * width + x] = is_dilated ? 255 : 0;
-    }
+void image_dilate(const uint8_t *src, uint8_t *dst, int width, int height,
+                  int kernel_size) {
+  if (!src || !dst || width <= 0 || height <= 0)
+    return;
+  kernel_size = clamp_kernel_size(kernel_size);
+
+  if (kernel_size == 3) {
+    dilate_3(src, dst, width, height);
+  } else if (kernel_size == 5) {
+    dilate_5(src, dst, width, height);
+  } else {
+    morph_separable(src, dst, width, height, kernel_size, /*is_dilate=*/1);
   }
 }
 
+/* ------------------------ Open / Close (unchanged) ------------------------ */
+/* 与您原有流程一致：开=腐蚀后膨胀；闭=膨胀后腐蚀:contentReference[oaicite:3]{index=3}
+ */
 void image_binary_open(uint8_t *binary_img, int width, int height,
                        int kernel_size) {
   uint8_t *temp_buf = (uint8_t *)malloc((size_t)width * (size_t)height);
@@ -778,8 +1013,8 @@ void image_binary_open(uint8_t *binary_img, int width, int height,
     return;
   }
   memset(temp_buf, 0, (size_t)width * (size_t)height);
-  image_binary_erode(binary_img, temp_buf, width, height, kernel_size);
-  image_binary_dilate(temp_buf, binary_img, width, height, kernel_size);
+  image_erode(binary_img, temp_buf, width, height, kernel_size);
+  image_dilate(temp_buf, binary_img, width, height, kernel_size);
   free(temp_buf);
 }
 
@@ -791,8 +1026,8 @@ void image_binary_close(uint8_t *binary_img, int width, int height,
     return;
   }
   memset(temp_buf, 0, (size_t)width * (size_t)height);
-  image_binary_dilate(binary_img, temp_buf, width, height, kernel_size);
-  image_binary_erode(temp_buf, binary_img, width, height, kernel_size);
+  image_dilate(binary_img, temp_buf, width, height, kernel_size);
+  image_erode(temp_buf, binary_img, width, height, kernel_size);
   free(temp_buf);
 }
 
@@ -835,104 +1070,79 @@ int find_blobs(const uint8_t *binary_img, int width, int height,
   const int H = height;
   const size_t N = (size_t)W * (size_t)H;
 
-  // labels: 每像素 32 位标签（避免 320x240 超过 65535 的上限）
-  int *labels = (int *)malloc(N * sizeof(int));
-  if (!labels)
-    return 0;
-  memset(labels, 0, N * sizeof(int));
+  /* ---------- 1) 编译期静态工作区（上限由 CAMERA_* 与宏推导） ---------- */
+  enum {
+    MAX_PIXELS = (size_t)CAMERA_WIDTH * (size_t)CAMERA_HEIGHT,
+    MAX_LABELS = (int)(MAX_PIXELS / 2) + 128
+  };
 
-  // 上限估计：checkerboard 最坏情况下的等价类近似 W*H/2
-  // 原实现使用了 /4，可能在碎片多时不够稳妥；这里使用 /2
-  // 并在需要时增长:contentReference[oaicite:3]{index=3}
-  int max_labels = (int)(N / 2) + 16;
-  if (max_labels < 1024)
-    max_labels = 1024; // 给小图一个最小空间
-
-  int *parent = (int *)malloc((size_t)max_labels * sizeof(int));
-  uint8_t *rank = (uint8_t *)malloc((size_t)max_labels * sizeof(uint8_t));
-  if (!parent || !rank) {
-    free(labels);
-    if (parent)
-      free(parent);
-    if (rank)
-      free(rank);
+  /* 分辨率越界保护：如果调用传入的尺寸大于编译期上限，直接拒绝，避免越界 */
+  if (N == 0 || N > MAX_PIXELS) {
     return 0;
   }
 
-  // 初始化并查集
+  /* 所有工作区静态分配（.bss/.data），运行时不再分配 */
+  static int labels_static[MAX_PIXELS];   /* N * 4B */
+  static int parent_static[MAX_LABELS];   /* MAX_LABELS * 4B */
+  static uint8_t rank_static[MAX_LABELS]; /* MAX_LABELS * 1B */
+  /* 统计容器，按“出现过的 root 标签的上界 L”索引；为简化也用 MAX_LABELS 上限 */
+  static int pix_cnt_static[MAX_LABELS];
+  static int min_x_static[MAX_LABELS];
+  static int min_y_static[MAX_LABELS];
+  static int max_x_static[MAX_LABELS];
+  static int max_y_static[MAX_LABELS];
+
+  int *labels = labels_static;
+  int *parent = parent_static;
+  uint8_t *rank = rank_static;
+
+  memset(labels, 0, N * sizeof(int));
+
   int next_label = 1;
   parent[0] = 0;
   rank[0] = 0;
 
-  // -------- Pass 1：扫描 + 初始赋标 + 建立等价关系（8 邻域） --------
   for (int y = 0; y < H; ++y) {
     const int yW = y * W;
     for (int x = 0; x < W; ++x) {
       const int idx = yW + x;
-      if (binary_img[idx] != 255) {
-        // 背景像素
+      if (binary_img[idx] != 255)
         continue;
-      }
 
-      int nlabels[4]; // 收集上、左上、上右、左的已赋非零标签
+      int nlabels[4];
       int ncnt = 0;
-
-      // 上 (y-1,x)
       if (y > 0) {
         int t = labels[(y - 1) * W + x];
         if (t)
           nlabels[ncnt++] = t;
       }
-      // 左 (y,x-1)
       if (x > 0) {
         int t = labels[yW + (x - 1)];
         if (t)
           nlabels[ncnt++] = t;
       }
-      // 左上 (y-1,x-1)
       if (y > 0 && x > 0) {
-        int t = labels[(y - 1) * W + (x - 1)];
+        int t = labels[(y - 1) * W + x - 1];
         if (t)
           nlabels[ncnt++] = t;
       }
-      // 右上 (y-1,x+1)
-      if (y > 0 && x < (W - 1)) {
-        int t = labels[(y - 1) * W + (x + 1)];
+      if (y > 0 && x < W - 1) {
+        int t = labels[(y - 1) * W + x + 1];
         if (t)
           nlabels[ncnt++] = t;
       }
 
       if (ncnt == 0) {
-        // 分配新标签
-        if (next_label >= max_labels) {
-          // 扩容 parent / rank
-          int new_cap = max_labels * 3 / 2 + 1024;
-          int *new_parent =
-              (int *)realloc(parent, (size_t)new_cap * sizeof(int));
-          uint8_t *new_rank =
-              (uint8_t *)realloc(rank, (size_t)new_cap * sizeof(uint8_t));
-          if (!new_parent || !new_rank) {
-            // 内存不足，提前退出：尽可能返回已有结果
-            free(labels);
-            if (new_parent)
-              free(new_parent);
-            if (new_rank)
-              free(new_rank);
-            free(parent);
-            free(rank);
-            return 0;
-          }
-          parent = new_parent;
-          rank = new_rank;
-          max_labels = new_cap;
+        if (next_label >= MAX_LABELS) {
+          return 0;
         }
         labels[idx] = next_label;
         parent[next_label] = next_label;
         rank[next_label] = 0;
         next_label++;
       } else {
-        // 选择最小的根标签作为当前像素标签，并将其它等价
-        int min_root = find_root(parent, nlabels[0]);
+        int min_root = nlabels[0];
+        min_root = find_root(parent, min_root);
         for (int k = 1; k < ncnt; ++k) {
           int rk = find_root(parent, nlabels[k]);
           if (rk != min_root) {
@@ -950,58 +1160,19 @@ int find_blobs(const uint8_t *binary_img, int width, int height,
     }
   }
 
-  // 如果没有前景像素
   if (next_label == 1) {
-    free(labels);
-    free(parent);
-    free(rank);
     return 0;
   }
 
-  // -------- 压缩：为每个最终根分配紧凑 ID，并统计特征 --------
-  const int L = next_label; // 实际出现的标签上界（开区间）
-  int *root_map =
-      (int *)malloc((size_t)L * sizeof(int)); // root -> 紧凑 id（1..k）
-  if (!root_map) {
-    free(labels);
-    free(parent);
-    free(rank);
-    return 0;
-  }
-  memset(root_map, 0, (size_t)L * sizeof(int));
-
-  // 统计容器：按 root 索引（先用 root 直接索引，稍后再压缩到 blobs）
-  int *pix_cnt = (int *)calloc((size_t)L, sizeof(int));
-  int *min_x = (int *)malloc((size_t)L * sizeof(int));
-  int *min_y = (int *)malloc((size_t)L * sizeof(int));
-  int *max_x = (int *)malloc((size_t)L * sizeof(int));
-  int *max_y = (int *)malloc((size_t)L * sizeof(int));
-  if (!pix_cnt || !min_x || !min_y || !max_x || !max_y) {
-    free(labels);
-    free(parent);
-    free(rank);
-    free(root_map);
-    if (pix_cnt)
-      free(pix_cnt);
-    if (min_x)
-      free(min_x);
-    if (min_y)
-      free(min_y);
-    if (max_x)
-      free(max_x);
-    if (max_y)
-      free(max_y);
-    return 0;
-  }
-
+  const int L = next_label;
+  memset(pix_cnt_static, 0, (size_t)L * sizeof(int));
   for (int i = 0; i < L; ++i) {
-    min_x[i] = 0x7FFFFFFF;
-    min_y[i] = 0x7FFFFFFF;
-    max_x[i] = -0x7FFFFFFF;
-    max_y[i] = -0x7FFFFFFF;
+    min_x_static[i] = 0x7FFFFFFF;
+    min_y_static[i] = 0x7FFFFFFF;
+    max_x_static[i] = -0x7FFFFFFF;
+    max_y_static[i] = -0x7FFFFFFF;
   }
 
-  // Pass 2：压根 + 累计统计
   for (int y = 0; y < H; ++y) {
     const int yW = y * W;
     for (int x = 0; x < W; ++x) {
@@ -1010,52 +1181,33 @@ int find_blobs(const uint8_t *binary_img, int width, int height,
       if (!lab)
         continue;
       int r = find_root(parent, lab);
-      labels[idx] = r; // 写回根，便于后续可能使用
+      labels[idx] = r;
 
-      pix_cnt[r] += 1;
-      if (x < min_x[r])
-        min_x[r] = x;
-      if (y < min_y[r])
-        min_y[r] = y;
-      if (x > max_x[r])
-        max_x[r] = x;
-      if (y > max_y[r])
-        max_y[r] = y;
+      pix_cnt_static[r] += 1;
+      if (x < min_x_static[r])
+        min_x_static[r] = x;
+      if (y < min_y_static[r])
+        min_y_static[r] = y;
+      if (x > max_x_static[r])
+        max_x_static[r] = x;
+      if (y > max_y_static[r])
+        max_y_static[r] = y;
     }
   }
 
-  // 将非空的 root 映射为紧凑 ID，并写入输出 blobs（最多 max_blobs 个）
   int blob_count = 0;
   for (int r = 1; r < L && blob_count < max_blobs; ++r) {
-    if (pix_cnt[r] > 0) {
-      // 压缩为 [1..blob_count]
-      root_map[r] = blob_count + 1;
-
+    if (pix_cnt_static[r] > 0) {
       BlobInfo bi;
-      bi.id =
-          blob_count +
-          1; // 1 起始
-             // ID（与原实现保持一致习惯）:contentReference[oaicite:4]{index=4}
-      bi.pixel_count = pix_cnt[r];
-      bi.min_x = (min_x[r] == 0x7FFFFFFF) ? 0 : min_x[r];
-      bi.min_y = (min_y[r] == 0x7FFFFFFF) ? 0 : min_y[r];
-      bi.max_x = (max_x[r] == -0x7FFFFFFF) ? 0 : max_x[r];
-      bi.max_y = (max_y[r] == -0x7FFFFFFF) ? 0 : max_y[r];
-
+      bi.id = blob_count + 1;
+      bi.pixel_count = pix_cnt_static[r];
+      bi.min_x = (min_x_static[r] == 0x7FFFFFFF) ? 0 : min_x_static[r];
+      bi.min_y = (min_y_static[r] == 0x7FFFFFFF) ? 0 : min_y_static[r];
+      bi.max_x = (max_x_static[r] == -0x7FFFFFFF) ? 0 : max_x_static[r];
+      bi.max_y = (max_y_static[r] == -0x7FFFFFFF) ? 0 : max_y_static[r];
       blobs[blob_count++] = bi;
     }
   }
-
-  // 释放内存
-  free(labels);
-  free(parent);
-  free(rank);
-  free(root_map);
-  free(pix_cnt);
-  free(min_x);
-  free(min_y);
-  free(max_x);
-  free(max_y);
 
   return blob_count;
 }
