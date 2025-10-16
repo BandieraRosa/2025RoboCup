@@ -303,245 +303,312 @@ void image_strech_chart(uint8_t *image_addr, uint16_t image_width,
 /* ---------------- 颜色空间转换：像素级 ---------------- */
 
 void rgb888_to_rgb565_pixel(uint8_t r, uint8_t g, uint8_t b, uint16_t *rgb565) {
-    *rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+  *rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-void rgb565_to_rgb888_pixel(uint16_t rgb565, uint8_t *r, uint8_t *g, uint8_t *b) {
-    uint8_t r5 = (rgb565 >> 11) & 0x1F;
-    uint8_t g6 = (rgb565 >> 5) & 0x3F;
-    uint8_t b5 = rgb565 & 0x1F;
-    *r = (r5 << 3) | (r5 >> 2);
-    *g = (g6 << 2) | (g6 >> 4);
-    *b = (b5 << 3) | (b5 >> 2);
+void rgb565_to_rgb888_pixel(uint16_t rgb565, uint8_t *r, uint8_t *g,
+                            uint8_t *b) {
+  uint8_t r5 = (rgb565 >> 11) & 0x1F;
+  uint8_t g6 = (rgb565 >> 5) & 0x3F;
+  uint8_t b5 = rgb565 & 0x1F;
+  *r = (r5 << 3) | (r5 >> 2);
+  *g = (g6 << 2) | (g6 >> 4);
+  *b = (b5 << 3) | (b5 >> 2);
 }
 
 void rgb888_to_gray_pixel(uint8_t r, uint8_t g, uint8_t b, uint8_t *gray) {
-    /* Y ≈ 0.299R + 0.587G + 0.114B，使用整数近似： (306*r + 601*g + 117*b) >> 10 */
-    *gray = (uint8_t)((306 * r + 601 * g + 117 * b) >> 10);
+  /* Y ≈ 0.299R + 0.587G + 0.114B，使用整数近似： (306*r + 601*g + 117*b) >> 10
+   */
+  *gray = (uint8_t)((306 * r + 601 * g + 117 * b) >> 10);
 }
 
 void gray_to_rgb888_pixel(uint8_t gray, uint8_t *r, uint8_t *g, uint8_t *b) {
-    *r = gray; *g = gray; *b = gray;
+  *r = gray;
+  *g = gray;
+  *b = gray;
 }
 
 void rgb565_to_gray_pixel(uint16_t rgb565, uint8_t *gray) {
-    uint8_t r, g, b;
-    rgb565_to_rgb888_pixel(rgb565, &r, &g, &b);
-    rgb888_to_gray_pixel(r, g, b, gray);
+  uint8_t r, g, b;
+  rgb565_to_rgb888_pixel(rgb565, &r, &g, &b);
+  rgb888_to_gray_pixel(r, g, b, gray);
 }
 
 void gray_to_rgb565_pixel(uint8_t gray, uint16_t *rgb565) {
-    uint8_t r, g, b;
-    gray_to_rgb888_pixel(gray, &r, &g, &b);
-    rgb888_to_rgb565_pixel(r, g, b, rgb565);
+  uint8_t r, g, b;
+  gray_to_rgb888_pixel(gray, &r, &g, &b);
+  rgb888_to_rgb565_pixel(r, g, b, rgb565);
 }
 
-void rgb888_to_hsv_pixel(uint8_t r, uint8_t g, uint8_t b, uint16_t *h, uint8_t *s, uint8_t *v) {
-    uint8_t min_val = r < g ? r : g;
-    min_val = min_val < b ? min_val : b;
-    uint8_t max_val = r > g ? r : g;
-    max_val = max_val > b ? max_val : b;
+void rgb888_to_hsv_pixel(uint8_t r, uint8_t g, uint8_t b, uint16_t *h,
+                         uint8_t *s, uint8_t *v) {
+  uint8_t min_val = r < g ? r : g;
+  min_val = min_val < b ? min_val : b;
+  uint8_t max_val = r > g ? r : g;
+  max_val = max_val > b ? max_val : b;
 
-    *v = max_val;
-    if (max_val == 0) { *s = 0; *h = 0; return; }
+  *v = max_val;
+  if (max_val == 0) {
+    *s = 0;
+    *h = 0;
+    return;
+  }
 
-    int32_t delta = (int32_t)max_val - (int32_t)min_val;
-    if (delta == 0) { *s = 0; *h = 0; return; }
+  int32_t delta = (int32_t)max_val - (int32_t)min_val;
+  if (delta == 0) {
+    *s = 0;
+    *h = 0;
+    return;
+  }
 
-    *s = (uint8_t)(255 * delta / max_val);
+  *s = (uint8_t)(255 * delta / max_val);
 
-    int32_t hue;
-    if (r == max_val)       hue = (int32_t)(g - b) * 60 / delta;
-    else if (g == max_val)  hue = 120 + (int32_t)(b - r) * 60 / delta;
-    else                    hue = 240 + (int32_t)(r - g) * 60 / delta;
+  int32_t hue;
+  if (r == max_val)
+    hue = (int32_t)(g - b) * 60 / delta;
+  else if (g == max_val)
+    hue = 120 + (int32_t)(b - r) * 60 / delta;
+  else
+    hue = 240 + (int32_t)(r - g) * 60 / delta;
 
-    if (hue < 0) hue += 360;
-    *h = (uint16_t)hue;
+  if (hue < 0)
+    hue += 360;
+  *h = (uint16_t)hue;
 }
 
-void hsv_to_rgb888_pixel(uint16_t h, uint8_t s, uint8_t v, uint8_t *r, uint8_t *g, uint8_t *b) {
-    if (s == 0) { *r = *g = *b = v; return; }
+void hsv_to_rgb888_pixel(uint16_t h, uint8_t s, uint8_t v, uint8_t *r,
+                         uint8_t *g, uint8_t *b) {
+  if (s == 0) {
+    *r = *g = *b = v;
+    return;
+  }
 
-    h %= 360;
-    uint8_t region = h / 60;
-    uint16_t remainder = (h % 60) * 255 / 60;
+  h %= 360;
+  uint8_t region = h / 60;
+  uint16_t remainder = (h % 60) * 255 / 60;
 
-    uint16_t p = (v * (255 - s)) / 255;
-    uint16_t q = (v * (255 * 255 - s * remainder)) / (255 * 255);
-    uint16_t t = (v * (255 * 255 - s * (255 - remainder))) / (255 * 255);
+  uint16_t p = (v * (255 - s)) / 255;
+  uint16_t q = (v * (255 * 255 - s * remainder)) / (255 * 255);
+  uint16_t t = (v * (255 * 255 - s * (255 - remainder))) / (255 * 255);
 
-    switch (region) {
-        case 0: *r = v; *g = t; *b = p; break;
-        case 1: *r = q; *g = v; *b = p; break;
-        case 2: *r = p; *g = v; *b = t; break;
-        case 3: *r = p; *g = q; *b = v; break;
-        case 4: *r = t; *g = p; *b = v; break;
-        default:*r = v; *g = p; *b = q; break;
-    }
+  switch (region) {
+  case 0:
+    *r = v;
+    *g = t;
+    *b = p;
+    break;
+  case 1:
+    *r = q;
+    *g = v;
+    *b = p;
+    break;
+  case 2:
+    *r = p;
+    *g = v;
+    *b = t;
+    break;
+  case 3:
+    *r = p;
+    *g = q;
+    *b = v;
+    break;
+  case 4:
+    *r = t;
+    *g = p;
+    *b = v;
+    break;
+  default:
+    *r = v;
+    *g = p;
+    *b = q;
+    break;
+  }
 }
 
 void rgb565_to_hsv_pixel(uint16_t rgb565, uint16_t *h, uint8_t *s, uint8_t *v) {
-    uint8_t r, g, b;
-    rgb565_to_rgb888_pixel(rgb565, &r, &g, &b);
-    rgb888_to_hsv_pixel(r, g, b, h, s, v);
+  uint8_t r, g, b;
+  rgb565_to_rgb888_pixel(rgb565, &r, &g, &b);
+  rgb888_to_hsv_pixel(r, g, b, h, s, v);
 }
 
 void hsv_to_rgb565_pixel(uint16_t h, uint8_t s, uint8_t v, uint16_t *rgb565) {
-    uint8_t r, g, b;
-    hsv_to_rgb888_pixel(h, s, v, &r, &g, &b);
-    rgb888_to_rgb565_pixel(r, g, b, rgb565);
+  uint8_t r, g, b;
+  hsv_to_rgb888_pixel(h, s, v, &r, &g, &b);
+  rgb888_to_rgb565_pixel(r, g, b, rgb565);
 }
 
 /* ---------------- 颜色空间转换：图像级 ---------------- */
 
-void rgb888_to_gray(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void rgb888_to_gray(const void *src_addr, void *dst_addr, int width,
+                    int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint8_t *p_src_r = (const uint8_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
-    const uint8_t *p_src_g = p_src_r + plane_size;
-    const uint8_t *p_src_b = p_src_g + plane_size;
+  const uint8_t *p_src_r = (const uint8_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
+  const uint8_t *p_src_g = p_src_r + plane_size;
+  const uint8_t *p_src_b = p_src_g + plane_size;
 
-    uint8_t *p_dst = (uint8_t*)dst_addr;
+  uint8_t *p_dst = (uint8_t *)dst_addr;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        rgb888_to_gray_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    rgb888_to_gray_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst[i]);
+  }
 }
 
-void gray_to_rgb888(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void gray_to_rgb888(const void *src_addr, void *dst_addr, int width,
+                    int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint8_t *p_src = (const uint8_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
+  const uint8_t *p_src = (const uint8_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
 
-    uint8_t *p_dst_r = (uint8_t*)dst_addr;
-    uint8_t *p_dst_g = p_dst_r + plane_size;
-    uint8_t *p_dst_b = p_dst_g + plane_size;
+  uint8_t *p_dst_r = (uint8_t *)dst_addr;
+  uint8_t *p_dst_g = p_dst_r + plane_size;
+  uint8_t *p_dst_b = p_dst_g + plane_size;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        p_dst_r[i] = p_src[i];
-        p_dst_g[i] = p_src[i];
-        p_dst_b[i] = p_src[i];
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    p_dst_r[i] = p_src[i];
+    p_dst_g[i] = p_src[i];
+    p_dst_b[i] = p_src[i];
+  }
 }
 
-void rgb888_to_rgb565(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void rgb888_to_rgb565(const void *src_addr, void *dst_addr, int width,
+                      int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint8_t *p_src_r = (const uint8_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
-    const uint8_t *p_src_g = p_src_r + plane_size;
-    const uint8_t *p_src_b = p_src_g + plane_size;
+  const uint8_t *p_src_r = (const uint8_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
+  const uint8_t *p_src_g = p_src_r + plane_size;
+  const uint8_t *p_src_b = p_src_g + plane_size;
 
-    uint16_t *p_dst = (uint16_t*)dst_addr;
+  uint16_t *p_dst = (uint16_t *)dst_addr;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        rgb888_to_rgb565_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    rgb888_to_rgb565_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst[i]);
+  }
 }
 
-void rgb565_to_rgb888(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void rgb565_to_rgb888(const void *src_addr, void *dst_addr, int width,
+                      int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint16_t *p_src = (const uint16_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
+  const uint16_t *p_src = (const uint16_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
 
-    uint8_t *p_dst_r = (uint8_t*)dst_addr;
-    uint8_t *p_dst_g = p_dst_r + plane_size;
-    uint8_t *p_dst_b = p_dst_g + plane_size;
+  uint8_t *p_dst_r = (uint8_t *)dst_addr;
+  uint8_t *p_dst_g = p_dst_r + plane_size;
+  uint8_t *p_dst_b = p_dst_g + plane_size;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        rgb565_to_rgb888_pixel(p_src[i], &p_dst_r[i], &p_dst_g[i], &p_dst_b[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    rgb565_to_rgb888_pixel(p_src[i], &p_dst_r[i], &p_dst_g[i], &p_dst_b[i]);
+  }
 }
 
-void gray_to_rgb565(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void gray_to_rgb565(const void *src_addr, void *dst_addr, int width,
+                    int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint8_t *p_src = (const uint8_t*)src_addr;
-    uint16_t *p_dst = (uint16_t*)dst_addr;
-    size_t num_pixels = (size_t)width * (size_t)height;
+  const uint8_t *p_src = (const uint8_t *)src_addr;
+  uint16_t *p_dst = (uint16_t *)dst_addr;
+  size_t num_pixels = (size_t)width * (size_t)height;
 
-    for (size_t i = 0; i < num_pixels; i++) {
-        gray_to_rgb565_pixel(p_src[i], &p_dst[i]);
-    }
+  for (size_t i = 0; i < num_pixels; i++) {
+    gray_to_rgb565_pixel(p_src[i], &p_dst[i]);
+  }
 }
 
-void rgb565_to_gray(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void rgb565_to_gray(const void *src_addr, void *dst_addr, int width,
+                    int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint16_t *p_src = (const uint16_t*)src_addr;
-    uint8_t *p_dst = (uint8_t*)dst_addr;
-    size_t num_pixels = (size_t)width * (size_t)height;
+  const uint16_t *p_src = (const uint16_t *)src_addr;
+  uint8_t *p_dst = (uint8_t *)dst_addr;
+  size_t num_pixels = (size_t)width * (size_t)height;
 
-    for (size_t i = 0; i < num_pixels; i++) {
-        rgb565_to_gray_pixel(p_src[i], &p_dst[i]);
-    }
+  for (size_t i = 0; i < num_pixels; i++) {
+    rgb565_to_gray_pixel(p_src[i], &p_dst[i]);
+  }
 }
 
-void rgb888_to_hsv(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void rgb888_to_hsv(const void *src_addr, void *dst_addr, int width,
+                   int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint8_t *p_src_r = (const uint8_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
-    const uint8_t *p_src_g = p_src_r + plane_size;
-    const uint8_t *p_src_b = p_src_g + plane_size;
+  const uint8_t *p_src_r = (const uint8_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
+  const uint8_t *p_src_g = p_src_r + plane_size;
+  const uint8_t *p_src_b = p_src_g + plane_size;
 
-    uint16_t *p_dst_h = (uint16_t*)dst_addr;
-    uint8_t  *p_dst_s = (uint8_t*)(p_dst_h + plane_size);
-    uint8_t  *p_dst_v = p_dst_s + plane_size;
+  uint16_t *p_dst_h = (uint16_t *)dst_addr;
+  uint8_t *p_dst_s = (uint8_t *)(p_dst_h + plane_size);
+  uint8_t *p_dst_v = p_dst_s + plane_size;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        rgb888_to_hsv_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst_h[i], &p_dst_s[i], &p_dst_v[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    rgb888_to_hsv_pixel(p_src_r[i], p_src_g[i], p_src_b[i], &p_dst_h[i],
+                        &p_dst_s[i], &p_dst_v[i]);
+  }
 }
 
-void hsv_to_rgb888(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void hsv_to_rgb888(const void *src_addr, void *dst_addr, int width,
+                   int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint16_t *p_src_h = (const uint16_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
-    const uint8_t  *p_src_s = (const uint8_t*)(p_src_h + plane_size);
-    const uint8_t  *p_src_v = p_src_s + plane_size;
+  const uint16_t *p_src_h = (const uint16_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
+  const uint8_t *p_src_s = (const uint8_t *)(p_src_h + plane_size);
+  const uint8_t *p_src_v = p_src_s + plane_size;
 
-    uint8_t *p_dst_r = (uint8_t*)dst_addr;
-    uint8_t *p_dst_g = p_dst_r + plane_size;
-    uint8_t *p_dst_b = p_dst_g + plane_size;
+  uint8_t *p_dst_r = (uint8_t *)dst_addr;
+  uint8_t *p_dst_g = p_dst_r + plane_size;
+  uint8_t *p_dst_b = p_dst_g + plane_size;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        hsv_to_rgb888_pixel(p_src_h[i], p_src_s[i], p_src_v[i], &p_dst_r[i], &p_dst_g[i], &p_dst_b[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    hsv_to_rgb888_pixel(p_src_h[i], p_src_s[i], p_src_v[i], &p_dst_r[i],
+                        &p_dst_g[i], &p_dst_b[i]);
+  }
 }
 
-void rgb565_to_hsv(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void rgb565_to_hsv(const void *src_addr, void *dst_addr, int width,
+                   int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint16_t *p_src = (const uint16_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
+  const uint16_t *p_src = (const uint16_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
 
-    uint16_t *p_dst_h = (uint16_t*)dst_addr;
-    uint8_t  *p_dst_s = (uint8_t*)(p_dst_h + plane_size);
-    uint8_t  *p_dst_v = p_dst_s + plane_size;
+  uint16_t *p_dst_h = (uint16_t *)dst_addr;
+  uint8_t *p_dst_s = (uint8_t *)(p_dst_h + plane_size);
+  uint8_t *p_dst_v = p_dst_s + plane_size;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        rgb565_to_hsv_pixel(p_src[i], &p_dst_h[i], &p_dst_s[i], &p_dst_v[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    rgb565_to_hsv_pixel(p_src[i], &p_dst_h[i], &p_dst_s[i], &p_dst_v[i]);
+  }
 }
 
-void hsv_to_rgb565(const void *src_addr, void *dst_addr, int width, int height) {
-    if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0) return;
+void hsv_to_rgb565(const void *src_addr, void *dst_addr, int width,
+                   int height) {
+  if (src_addr == NULL || dst_addr == NULL || width <= 0 || height <= 0)
+    return;
 
-    const uint16_t *p_src_h = (const uint16_t*)src_addr;
-    size_t plane_size = (size_t)width * (size_t)height;
-    const uint8_t  *p_src_s = (const uint8_t*)(p_src_h + plane_size);
-    const uint8_t  *p_src_v = p_src_s + plane_size;
+  const uint16_t *p_src_h = (const uint16_t *)src_addr;
+  size_t plane_size = (size_t)width * (size_t)height;
+  const uint8_t *p_src_s = (const uint8_t *)(p_src_h + plane_size);
+  const uint8_t *p_src_v = p_src_s + plane_size;
 
-    uint16_t *p_dst = (uint16_t*)dst_addr;
+  uint16_t *p_dst = (uint16_t *)dst_addr;
 
-    for (size_t i = 0; i < plane_size; i++) {
-        hsv_to_rgb565_pixel(p_src_h[i], p_src_s[i], p_src_v[i], &p_dst[i]);
-    }
+  for (size_t i = 0; i < plane_size; i++) {
+    hsv_to_rgb565_pixel(p_src_h[i], p_src_s[i], p_src_v[i], &p_dst[i]);
+  }
 }
 
 /* ---------------- RGB565 绘图操作 ---------------- */
@@ -595,10 +662,14 @@ void draw_box_rgb565_image(uint16_t *image_addr, uint16_t image_width,
   uint32_t data = ((uint32_t)color << 16) | (uint32_t)color;
   uint32_t *addr1, *addr2, *addr3, *addr4;
 
-  if (x1 < 1) x1 = 0;
-  if (x2 > 319) x2 = 319;
-  if (y1 < 1) y1 = 0;
-  if (y2 > 239) y2 = 239;
+  if (x1 < 1)
+    x1 = 0;
+  if (x2 > 319)
+    x2 = 319;
+  if (y1 < 1)
+    y1 = 0;
+  if (y2 > 239)
+    y2 = 239;
 
   addr1 = (uint32_t *)image_addr + (image_width * y1 + x1) / 2;
   addr2 = (uint32_t *)image_addr + (image_width * (y1 + 1) + x1) / 2;
@@ -628,10 +699,14 @@ void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width,
   uint32_t data = ((uint32_t)color << 16) | (uint32_t)color;
   uint32_t *addr;
 
-  if (x1 < 1) x1 = 0;
-  if (x2 > 319) x2 = 319;
-  if (y1 < 1) y1 = 0;
-  if (y2 > 239) y2 = 239;
+  if (x1 < 1)
+    x1 = 0;
+  if (x2 > 319)
+    x2 = 319;
+  if (y1 < 1)
+    y1 = 0;
+  if (y2 > 239)
+    y2 = 239;
 
   addr = (uint32_t *)image_addr + (image_width * y1 + x1) / 2;
   for (uint8_t j = 0; j < y2 - y1; j++) {
@@ -644,8 +719,10 @@ void draw_fill_rectangle_image(uint16_t *image_addr, uint16_t image_width,
 
 void draw_point_rgb565_image(uint16_t *image_addr, uint16_t image_width,
                              uint16_t x, uint16_t y, uint16_t color) {
-  if (x > 319) x = 319;
-  if (y > 239) y = 239;
+  if (x > 319)
+    x = 319;
+  if (y > 239)
+    y = 239;
   *(image_addr + y * image_width + x) = color;
 }
 
@@ -664,7 +741,8 @@ void image_binary_erode(const uint8_t *src, uint8_t *dst, int width, int height,
             break;
           }
         }
-        if (!is_eroded) break;
+        if (!is_eroded)
+          break;
       }
       dst[y * width + x] = is_eroded ? 255 : 0;
     }
@@ -684,7 +762,8 @@ void image_binary_dilate(const uint8_t *src, uint8_t *dst, int width,
             break;
           }
         }
-        if (is_dilated) break;
+        if (is_dilated)
+          break;
       }
       dst[y * width + x] = is_dilated ? 255 : 0;
     }
@@ -718,7 +797,8 @@ void image_binary_close(uint8_t *binary_img, int width, int height,
 }
 
 static int find_root(int *parent, int i) {
-  if (parent[i] == i) return i;
+  if (parent[i] == i)
+    return i;
   parent[i] = find_root(parent, parent[i]);
   return parent[i];
 }
@@ -726,15 +806,18 @@ static void union_sets(int *parent, int i, int j) {
   int root_i = find_root(parent, i);
   int root_j = find_root(parent, j);
   if (root_i != root_j) {
-    if (root_i < root_j) parent[root_j] = root_i;
-    else parent[root_i] = root_j;
+    if (root_i < root_j)
+      parent[root_j] = root_i;
+    else
+      parent[root_i] = root_j;
   }
 }
 
 int find_blobs(const uint8_t *binary_img, int width, int height,
                BlobInfo *blobs, int max_blobs) {
   int *labels = (int *)malloc((size_t)width * (size_t)height * sizeof(int));
-  if (labels == NULL) return 0;
+  if (labels == NULL)
+    return 0;
   memset(labels, 0, (size_t)width * (size_t)height * sizeof(int));
 
   int max_labels = (width * height) / 4;
@@ -775,7 +858,12 @@ int find_blobs(const uint8_t *binary_img, int width, int height,
 end_pass1:;
 
   for (int i = 0; i < max_blobs; i++) {
-    blobs[i] = (BlobInfo){.id = i, .pixel_count = 0, .min_x = width, .min_y = height, .max_x = -1, .max_y = -1};
+    blobs[i] = (BlobInfo){.id = i,
+                          .pixel_count = 0,
+                          .min_x = width,
+                          .min_y = height,
+                          .max_x = -1,
+                          .max_y = -1};
   }
 
   for (int y = 0; y < height; y++) {
@@ -785,10 +873,14 @@ end_pass1:;
         labels[y * width + x] = root;
         if (root < max_blobs) {
           blobs[root].pixel_count++;
-          if (x < blobs[root].min_x) blobs[root].min_x = x;
-          if (y < blobs[root].min_y) blobs[root].min_y = y;
-          if (x > blobs[root].max_x) blobs[root].max_x = x;
-          if (y > blobs[root].max_y) blobs[root].max_y = y;
+          if (x < blobs[root].min_x)
+            blobs[root].min_x = x;
+          if (y < blobs[root].min_y)
+            blobs[root].min_y = y;
+          if (x > blobs[root].max_x)
+            blobs[root].max_x = x;
+          if (y > blobs[root].max_y)
+            blobs[root].max_y = y;
         }
       }
     }
@@ -798,7 +890,7 @@ end_pass1:;
   for (int i = 1; i < next_label; i++) {
     if (parent[i] == i && blobs[i].pixel_count > 0 && blob_count < max_blobs) {
       if (blob_count != i) {
-          blobs[blob_count] = blobs[i];
+        blobs[blob_count] = blobs[i];
       }
       blobs[blob_count].id = blob_count + 1;
       blob_count++;

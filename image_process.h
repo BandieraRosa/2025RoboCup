@@ -12,11 +12,12 @@
 #endif
 
 /* ---------------- 颜色分割阈值 ---------------- */
-#define SATURATION_THRESHOLD 40   /**< 最小色彩饱和度阈值：max(channel) - min(channel)，  */
-#define BRIGHTNESS_THRESHOLD 60   /**< 最小亮度阈值：max(channel) */
-#define COLOR_DIFF_THRESHOLD 30   /**< 颜色主导阈值：目标通道需高于其他通道的最小差值 */
+#define SATURATION_THRESHOLD 40   /**< 最小色彩饱和度阈值，场景变暗/阴影下调，场景变亮/反光上调 */
+#define BRIGHTNESS_THRESHOLD 60   /**< 最小亮度阈值，目标颜色变浅下调，背景杂色多上调 */
+#define COLOR_DIFF_THRESHOLD 50   /**< 颜色主导阈值，目标颜色变浅下调，背景大块近似红蓝上调*/
 
 /* ---------------- 球体候选过滤条件 ---------------- */
+#define MIN_BALL_PIXELS 7000
 #define ASPECT_RATIO_MIN  0.3f    /**< 包围盒宽高比下限 */
 #define ASPECT_RATIO_MAX  1.6f    /**< 包围盒宽高比上限 */
 #define FILL_FACTOR_MIN   0.25f   /**< 填充率下限：像素数/包围盒面积 */

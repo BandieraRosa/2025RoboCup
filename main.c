@@ -7,14 +7,13 @@
 #include <string.h>
 
 #include "./BSP/CAMERA/camera.h"
+#include "./BSP/KEY/key.h"
 #include "./BSP/LCD/lcd.h"
 #include "./BSP/UART/uart.h"
-#include "./BSP/KEY/key.h"
 
 #define DEBUG
 
 #define MAX_BLOBS 50
-#define MIN_BALL_PIXELS 7000
 
 void init() {
   sysctl_pll_set_freq(SYSCTL_PLL0, 800000000);
@@ -61,12 +60,12 @@ int main(void) {
     key = key_scan(0);
     if (key) {
       switch (key) {
-        case KEY2_PRES:
-          camera_set_light(1);
-          break;
-        case KEY1_PRES:
-          camera_set_light(0);
-          break;
+      case KEY2_PRES:
+        camera_set_light(1);
+        break;
+      case KEY1_PRES:
+        camera_set_light(0);
+        break;
       }
     }
     if (camera_snapshot(&camera_buf, NULL) == 0) {
@@ -129,7 +128,7 @@ int main(void) {
           float aspect_ratio = (float)width / height;
           printf("Blob WxH: %d x %d\n", width, height);
           printf("Aspect Ratio: %.2f\n", aspect_ratio);
-          if (aspect_ratio > 0.3f && aspect_ratio < 1.6f) {
+          if (aspect_ratio > ASPECT_RATIO_MIN && aspect_ratio < ASPECT_RATIO_MAX) {
             ball_found = 1;
           }
         }
@@ -137,16 +136,55 @@ int main(void) {
 
       char status_msg[50];
       if (ball_found) {
-        const char *color_str =
-            (red_pixel_count > blue_pixel_count) ? "RED" : "BLUE";
+        int red_in_blob = 0, blue_in_blob = 0;
+
+        // 安全裁剪（避免越界）
+        int x1 = largest_blob.min_x < 0 ? 0 : largest_blob.min_x;
+        int y1 = largest_blob.min_y < 0 ? 0 : largest_blob.min_y;
+        int x2 = largest_blob.max_x > (CAMERA_WIDTH - 1) ? (CAMERA_WIDTH - 1)
+                                                         : largest_blob.max_x;
+        int y2 = largest_blob.max_y > (CAMERA_HEIGHT - 1) ? (CAMERA_HEIGHT - 1)
+                                                          : largest_blob.max_y;
+
+        for (int y = y1; y <= y2; ++y) {
+          int base = y * CAMERA_WIDTH;
+          for (int x = x1; x <= x2; ++x) {
+            int idx = base + x;
+
+            if (binary_buf[idx] != 255)
+              continue;
+
+            uint16_t pixel_color = pixel_ptr[idx];
+            uint8_t r = ((pixel_color & 0xF800) >> 11) << 3;
+            uint8_t g = ((pixel_color & 0x07E0) >> 5) << 2;
+            uint8_t b = (pixel_color & 0x001F) << 3;
+
+            uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+            uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
+            uint8_t sat = max_c - min_c;
+
+            if (sat >= SATURATION_THRESHOLD && max_c >= BRIGHTNESS_THRESHOLD) {
+              if (r > (b + COLOR_DIFF_THRESHOLD) && r > g) {
+                red_in_blob++;
+              } else if (b > (r + COLOR_DIFF_THRESHOLD) && b > g) {
+                blue_in_blob++;
+              }
+            }
+          }
+        }
+
+        int red =
+            red_in_blob + blue_in_blob > 0 ? red_in_blob : red_pixel_count;
+        int blue =
+            red_in_blob + blue_in_blob > 0 ? blue_in_blob : blue_pixel_count;
+
+        const char *color_str = (red > blue) ? "RED" : "BLUE";
         sprintf(status_msg, "Ball: %s | Area: %d", color_str,
                 largest_blob.pixel_count);
-        printf("FOUND %s BALL at (%d, %d)\n", color_str,
-               (largest_blob.min_x + largest_blob.max_x) / 2,
-               (largest_blob.min_y + largest_blob.max_y) / 2);
-        enum COLOR color =
-            (red_pixel_count > blue_pixel_count) ? BALL_RED : BALL_BLUE;
+
+        enum COLOR color = (red > blue) ? BALL_RED : BALL_BLUE;
         uint8_t response = 0x00;
+
         if (color == BALL_RED) {
           response = 0x01;
         } else if (color == BALL_BLUE) {
@@ -204,12 +242,12 @@ int main(void) {
     key = key_scan(0);
     if (key) {
       switch (key) {
-        case KEY2_PRES:
-          camera_set_light(1);
-          break;
-        case KEY1_PRES:
-          camera_set_light(0);
-          break;
+      case KEY2_PRES:
+        camera_set_light(1);
+        break;
+      case KEY1_PRES:
+        camera_set_light(0);
+        break;
       }
     }
     if (camera_snapshot(&camera_buf, NULL) == 0) {
@@ -266,7 +304,7 @@ int main(void) {
 
         if (height > 0 && width > 0) {
           float aspect_ratio = (float)width / height;
-          if (aspect_ratio > 0.3f && aspect_ratio < 1.6f) {
+          if (aspect_ratio > ASPECT_RATIO_MIN && aspect_ratio < ASPECT_RATIO_MAX) {
             ball_found = 1;
           }
         }
