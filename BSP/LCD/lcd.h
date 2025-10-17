@@ -1,23 +1,3 @@
-/**
- ****************************************************************************************************
- * @file        lcd.h
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2024-01-01
- * @brief       LCD 驱动代码
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- * @attention
- * 
- * 实验平台:正点原子 K210开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- *
- ****************************************************************************************************
- */
-
 #ifndef __LCD_H
 #define __LCD_H
 
@@ -108,7 +88,7 @@ void lcd_set_area(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2);
 void lcd_clear(uint16_t color);
 void lcd_draw_rectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t width, uint16_t color);
 void lcd_draw_circle(uint16_t x0, uint16_t y0, uint8_t r, uint16_t color);
-void lcd_draw_fill_rectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);  /* 在RBG565图片上填充矩形 */
+void lcd_draw_fill_rectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color);
 void lcd_draw_picture(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t *pic);
 void lcd_draw_point(uint16_t x, uint16_t y, uint16_t color);
 void lcd_draw_char(uint16_t x, uint16_t y, char c, uint16_t color);

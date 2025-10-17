@@ -1,3 +1,8 @@
+
+#include "./BSP/CAMERA/camera.h"
+#include "./BSP/KEY/key.h"
+#include "./BSP/LCD/lcd.h"
+#include "./BSP/UART/uart.h"
 #include "image_process.h"
 #include "plic.h"
 #include "sysctl.h"
@@ -6,17 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "./BSP/CAMERA/camera.h"
-#include "./BSP/KEY/key.h"
-#include "./BSP/LCD/lcd.h"
-#include "./BSP/UART/uart.h"
-
-#define DEBUG
-// #define PIXEL_DEBUG
-
+#define DEBUG_FLAG
 #define MAX_BLOBS 50
-
-/* ---------------- LUT 与分类器 ---------------- */
 
 static uint8_t R5_TO_8[32];
 static uint8_t G6_TO_8[64];
@@ -36,11 +32,9 @@ static inline uint8_t classify_rgb565(uint16_t p) {
   uint8_t r = R5_TO_8[(p >> 11) & 0x1F];
   uint8_t g = G6_TO_8[(p >> 5) & 0x3F];
   uint8_t b = B5_TO_8[p & 0x1F];
-
   uint8_t max_c = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
   uint8_t min_c = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
   uint8_t sat = (uint8_t)(max_c - min_c);
-
   if (sat < SATURATION_THRESHOLD || max_c < BRIGHTNESS_THRESHOLD)
     return 0;
   if ((int)r > (int)b + COLOR_DIFF_THRESHOLD && r > g)
@@ -50,9 +44,7 @@ static inline uint8_t classify_rgb565(uint16_t p) {
   return 0;
 }
 
-/* --------------------------------------------------------------------------*/
-
-void init() {
+static inline void init() {
   sysctl_pll_set_freq(SYSCTL_PLL0, 800000000);
   sysctl_pll_set_freq(SYSCTL_PLL1, 400000000);
   sysctl_pll_set_freq(SYSCTL_PLL2, 45158400);
@@ -61,7 +53,6 @@ void init() {
   sysctl_set_spi0_dvp_data(1);
   plic_init();
   sysctl_enable_irq();
-
   usart_init(115200);
   lcd_init();
   key_init();
@@ -74,7 +65,7 @@ void init() {
   rgb565_luts_init();
 }
 
-#ifdef DEBUG
+#ifdef DEBUG_FLAG
 int main(void) {
   init();
 
@@ -130,7 +121,7 @@ int main(void) {
 
       while (p < p_end) {
         uint16_t pix = *p++;
-        uint8_t cls = classify_rgb565(pix); // 0/1/2
+        uint8_t cls = classify_rgb565(pix);
         *cbuf++ = cls;
         uint8_t v = (uint8_t)(cls ? 255 : 0);
         *bin++ = v;
@@ -251,7 +242,7 @@ int main(void) {
   return 0;
 }
 
-#elif defined(PIXEL_DEBUG)
+#elif defined(DEBUG_PIXEL)
 int main(void) {
   init();
   uint8_t *camera_buf;
@@ -281,7 +272,6 @@ int main(void) {
     return -1;
   }
 
-  /* 新增：颜色缓存 */
   uint8_t *color_buf = (uint8_t *)malloc(CAMERA_WIDTH * CAMERA_HEIGHT);
   if (color_buf == NULL) {
     printf("Error: Failed to allocate color buffer\n");
@@ -308,8 +298,6 @@ int main(void) {
     }
     if (camera_snapshot(&camera_buf, NULL) == 0) {
       uint16_t *pixel_ptr = (uint16_t *)camera_buf;
-
-      /* ---- 单趟线性扫描：分类 + 计数 + 生成二值图/颜色缓存 ---- */
       const int N = CAMERA_WIDTH * CAMERA_HEIGHT;
       uint16_t *p = pixel_ptr;
       uint16_t *p_end = p + N;
@@ -320,7 +308,7 @@ int main(void) {
 
       while (p < p_end) {
         uint16_t pix = *p++;
-        uint8_t cls = classify_rgb565(pix); // 0/1/2
+        uint8_t cls = classify_rgb565(pix);
         *cbuf++ = cls;
         uint8_t v = (uint8_t)(cls ? 255 : 0);
         *bin++ = v;
@@ -361,7 +349,6 @@ int main(void) {
       }
 
       if (ball_found) {
-        /* ROI 内直接统计颜色（避免二次解码） */
         int red_in_blob = 0, blue_in_blob = 0;
 
         int x1 = largest_blob.min_x < 0 ? 0 : largest_blob.min_x;
@@ -417,7 +404,6 @@ int main(void) {
     }
   }
 
-  /* （理论上不可达） */
   free(binary_buf);
   free(color_buf);
   return 0;
